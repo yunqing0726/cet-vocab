@@ -37,6 +37,7 @@
   <section id="view-loading" class="view active">
     <div class="loader"></div>
     <p>正在翻开词典…</p>
+    <p class="loading-sub" id="loadingSub">首次加载约需几秒，请稍候</p>
   </section>
 
   <!-- 首页 -->
@@ -93,7 +94,10 @@
       <div class="quiz-hint">这个词，你认识吗？</div>
       <div class="word-display" id="placeWord">—</div>
       <div class="ipa-line" id="placeIpa"></div>
-      <button class="speak-btn" onclick="App.speak()"><svg><use href="#i-sound"/></svg>听发音</button>
+      <div class="speak-row">
+        <button class="accent-btn" id="accentBtnPlace" onclick="App.toggleAccent()" title="切换美式/英式">美</button>
+        <button class="speak-btn" onclick="App.speak()"><svg><use href="#i-sound"/></svg>听发音</button>
+      </div>
     </div>
     <div class="answer-actions" id="placeActions">
       <button class="btn btn-ghost" onclick="App.placeAnswer(false)">不认识</button>
@@ -112,7 +116,10 @@
       <div class="quiz-hint" id="quizHint">这个词，你认识吗？</div>
       <div class="word-display" id="quizWord">—</div>
       <div class="ipa-line" id="quizIpa"></div>
-      <button class="speak-btn" onclick="App.speak()"><svg><use href="#i-sound"/></svg>听发音</button>
+      <div class="speak-row">
+        <button class="accent-btn" id="accentBtn" onclick="App.toggleAccent()" title="切换美式/英式">美</button>
+        <button class="speak-btn" onclick="App.speak()"><svg><use href="#i-sound"/></svg>听发音</button>
+      </div>
 
       <div class="spell-box" id="spellBox" style="display:none">
         <input type="text" id="spellInput" placeholder="拼写这个单词" autocomplete="off" autocapitalize="off" spellcheck="false">

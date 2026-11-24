@@ -15,6 +15,7 @@ var S = {
   wrong: {},             // word -> {n: error count, last: ts, first: ts, level: lv}
   daily: {},             // 'YYYY-MM-DD' -> {new:number, correct:number, total:number}
   streak: 0,
+  accent: 2,             // 2=美式 1=英式（有道真人发音）
   lastActive: '',
   session: null,
   current: null,
@@ -73,27 +74,56 @@ function toast(msg){
   clearTimeout(t._tm); t._tm=setTimeout(function(){ t.classList.remove('show'); },2200);
 }
 
-/* ---------- 读音（Web Speech API + 在线音频兜底） ---------- */
+/* ---------- 真人发音（有道词典录音），提前预加载避免点击卡顿 ----------
+   type=2 美式 / type=1 英式；音频元素缓存复用，切词时后台预取 */
+var audioCache={};          // key: accent|word  -> Audio 元素
 var currentAudio=null;
+function audioUrl(word){
+  // 有道真人发音接口：国内可用，无需 key
+  return 'https://dict.youdao.com/dictvoice?audio='+encodeURIComponent(word)+'&type='+(S.accent==1?1:2);
+}
+function getAudio(word){
+  var key=(S.accent==1?1:2)+'|'+word.toLowerCase();
+  var a=audioCache[key];
+  if(!a){
+    a=new Audio();
+    a.preload='auto';
+    a.src=audioUrl(word);
+    a.load();
+    // 缓存上限，避免长时间使用内存膨胀
+    var ks=Object.keys(audioCache);
+    if(ks.length>60){ for(var i=0;i<12;i++){ try{ audioCache[ks[i]].pause(); }catch(e){} delete audioCache[ks[i]]; } }
+    audioCache[key]=a;
+  }
+  return a;
+}
+function preloadAudio(w){
+  if(!w) return;
+  try{ getAudio(w.w); }catch(e){}
+}
 function speak(){
   var w=S.current; if(!w) return;
-  // 优先在线标准人声录音
-  if(w.au && w.au.indexOf('http')===0){
-    try{
-      if(currentAudio){ currentAudio.pause(); }
-      currentAudio=new Audio(w.au);
-      var p=currentAudio.play();
-      if(p && p.then){ p.then(function(){ return true; }).catch(function(){ tts(w.w); }); return; }
-      return;
-    }catch(e){}
-  }
-  tts(w.w);
+  try{
+    if(currentAudio){ currentAudio.pause(); currentAudio.currentTime=0; }
+    var a=getAudio(w.w);
+    currentAudio=a;
+    var p=a.play();
+    if(p && p.catch){ p.catch(function(){ toast('音频加载中，请再点一次'); }); }
+  }catch(e){ toast('发音失败，请检查网络'); }
 }
-function tts(word){
-  if(!('speechSynthesis' in window)){ toast('当前浏览器不支持朗读'); return; }
-  speechSynthesis.cancel();
-  var u=new SpeechSynthesisUtterance(word); u.lang='en-US'; u.rate=.85;
-  speechSynthesis.speak(u);
+function toggleAccent(){
+  S.accent=S.accent==1?2:1; save();
+  // 预取新口音版本
+  preloadAudio(S.current);
+  updateAccentUI();
+  toast(S.accent==1?'已切换英式发音':'已切换美式发音');
+}
+function updateAccentUI(){
+  var t=S.accent==1?'英':'美';
+  ['accentBtn','accentBtnPlace'].forEach(function(id){
+    var b=document.getElementById(id);
+    if(b){ b.textContent=t; b.classList.toggle('uk',S.accent==1); }
+  });
 }
 
 /* ---------- 首屏 ---------- */
@@ -136,6 +166,7 @@ function showPlace(){
   var w=S.placeQueue[S.placeIdx];
   if(!w){ finishPlacement(); return; }
   S.current=w;
+  preloadAudio(w);
   document.getElementById('placeProgress').textContent=(S.placeIdx+1)+' / '+S.placeQueue.length;
   document.getElementById('placeWord').textContent=w.w;
   document.getElementById('placeIpa').textContent=w.ipa||'';
@@ -219,6 +250,8 @@ function showQuiz(){
   var ss=S.session, w=ss.queue[ss.idx];
   if(!w){ finishQuiz(); return; }
   S.current=w;
+  preloadAudio(w);
+  if(ss.queue[ss.idx+1]) preloadAudio(ss.queue[ss.idx+1]); // 后台预取下一个词
   var isSpell=ss.type==='spell';
   document.getElementById('quizTag').textContent=ss.type==='wrong'?'强化复习':(isSpell?'拼写测试':'认识测验');
   document.getElementById('quizProgress').textContent=(ss.idx+1)+' / '+ss.queue.length;
@@ -284,8 +317,7 @@ function reveal(known){
   document.getElementById('quizActions').style.display='none';
   document.getElementById('revealActions').style.display='flex';
   document.getElementById('quizTip').textContent=known?'✅ 回答正确':'❌ 已收入错题本，将按遗忘曲线安排复习';
-  // TTS 自动朗读一次
-  if(w.au || 'speechSynthesis' in window) setTimeout(speak,150);
+  // 不自动发音：点"听发音"才播放，避免卡顿感
 }
 function nextWord(){
   var ss=S.session; ss.idx++; showQuiz();
@@ -405,20 +437,29 @@ if(location.search.indexOf('test=1')>=0){
   window.confirm=function(){ return true; };
   window.alert=function(){};
 }
-window.App={go:go,setLevel:setLevel,startQuiz:startQuiz,speak:speak,placeAnswer:placeAnswer,
+window.App={go:go,setLevel:setLevel,startQuiz:startQuiz,speak:speak,toggleAccent:toggleAccent,placeAnswer:placeAnswer,
   answer:answer,checkSpell:checkSpell,nextWord:nextWord,markTooEasy:markTooEasy,
   resetPlacement:resetPlacement,exportData:exportData,importData:importData,clearAll:clearAll};
-if(location.search.indexOf('test=1')>=0){ window.App._setCurrent=function(w){ S.current=w; }; }
+if(location.search.indexOf('test=1')>=0){ window.App._setCurrent=function(w){ S.current=w; }; window.App._audioSrc=function(){ return currentAudio?currentAudio.src:''; }; }
 
-document.addEventListener('DOMContentLoaded',function(){
+var booted=false;
+function boot(){
+  if(booted) return;      // 防止 DOMContentLoaded 与直接调用重复执行
+  booted=true;
   load();
+  var lv=document.getElementById('view-loading');
   if(!ALL.length){
-    document.getElementById('view-loading').innerHTML='<div class="empty"><p>词库加载失败，请刷新重试</p></div>';
+    if(lv) lv.innerHTML='<div class="empty"><p>词库未能加载</p><p style="font-size:12px;margin-top:8px">请检查网络后刷新页面</p><button class="btn btn-ghost" style="margin-top:16px;flex:0 0 auto;padding:8px 18px" onclick="location.reload()">重新加载</button></div>';
     return;
   }
-  go('home');
+  updateAccentUI();
+  go('home');             // 立即切到首页，不依赖用户滚动
+  window.scrollTo(0,0);
   if(!S.placementDone){
     setTimeout(function(){ if(confirm('欢迎使用词频通！开始前需要进行一个 100 题的单词测试，用于精确判断你的词量并跳过已掌握的简单词。现在开始吗？')) startPlacement(); },400);
   }
-});
+}
+// 脚本在 </body> 前，DOM 已就绪，直接启动；同时保留事件兜底
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot);
+else boot();
 })();

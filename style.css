@@ -45,6 +45,7 @@ svg{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.7;st
 
 #view-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;color:var(--ink-soft);font-family:var(--serif)}
 .loader{width:34px;height:34px;border:1.5px solid var(--rule);border-top-color:var(--red);border-radius:50%;animation:spin .9s linear infinite}
+.loading-sub{font-family:var(--sans);font-size:13px;color:var(--ink-soft);margin-top:-8px}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* 首页首屏 */
@@ -90,10 +91,14 @@ svg{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.7;st
 .quiz-hint{font-size:13px;color:var(--ink-soft);letter-spacing:1px;margin-bottom:18px}
 .word-display{font-family:var(--serif);font-size:44px;line-height:1.1;font-weight:600;letter-spacing:.3px;word-break:break-word}
 .ipa-line{font-family:var(--serif);font-size:18px;color:var(--red);margin-top:10px;letter-spacing:.3px}
-.speak-btn{margin-top:18px;padding:8px 18px;border:1px solid var(--rule);border-radius:2px;background:var(--paper);
+.speak-row{margin-top:18px;display:inline-flex;align-items:center;gap:8px}
+.speak-btn{padding:8px 18px;border:1px solid var(--rule);border-radius:2px;background:var(--paper);
   font-size:13px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:7px;transition:.15s}
 .speak-btn:hover{border-color:var(--red);color:var(--red)}
 .speak-btn svg{width:16px;height:16px}
+.accent-btn{width:36px;height:35px;border:1px solid var(--rule);border-radius:2px;background:var(--paper);
+  font-family:var(--serif);font-size:14px;color:var(--ink);transition:.15s}
+.accent-btn.uk{background:var(--jade-wash);color:var(--jade);border-color:var(--jade)}
 
 .spell-box{margin-top:24px;display:flex;gap:8px}
 .spell-box input{flex:1;min-width:0;padding:13px;border:1px solid var(--rule);border-bottom:2px solid var(--ink);
