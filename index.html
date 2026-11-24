@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#4f46e5">
+<title>词频通 · 四六级高频词汇</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <!-- 顶部栏 -->
+  <header class="topbar">
+    <div class="brand" onclick="App.go('home')">📚 词频通</div>
+    <div class="top-actions">
+      <button class="icon-btn" onclick="App.go('dashboard')" title="学习看板">📊</button>
+      <button class="icon-btn" onclick="App.go('settings')" title="设置">⚙️</button>
+    </div>
+  </header>
+
+  <!-- 加载中 -->
+  <section id="view-loading" class="view active">
+    <div class="loader"></div>
+    <p>正在加载词库…</p>
+  </section>
+
+  <!-- 首页 -->
+  <section id="view-home" class="view">
+    <div class="hero">
+      <div class="hero-title">按考频背单词</div>
+      <div class="hero-sub">四级 · 六级 · 遗忘曲线强化</div>
+    </div>
+    <div id="homeStats" class="home-stats"></div>
+    <div class="menu-grid">
+      <button class="menu-card primary" onclick="App.startQuiz('normal')">
+        <div class="menu-icon">🎯</div>
+        <div class="menu-name">开始测验</div>
+        <div class="menu-desc">认识测验 · 看词辨义</div>
+      </button>
+      <button class="menu-card" onclick="App.startQuiz('spell')">
+        <div class="menu-icon">✍️</div>
+        <div class="menu-name">拼写测试</div>
+        <div class="menu-desc">看义拼写 · 加深记忆</div>
+      </button>
+      <button class="menu-card" onclick="App.go('wrongbook')">
+        <div class="menu-icon">📕</div>
+        <div class="menu-name">错题本</div>
+        <div class="menu-desc" id="wrongCount">遗忘曲线强化</div>
+      </button>
+      <button class="menu-card" onclick="App.go('dashboard')">
+        <div class="menu-icon">📊</div>
+        <div class="menu-name">学习看板</div>
+        <div class="menu-desc">打卡 · 正确率统计</div>
+      </button>
+    </div>
+    <div class="level-bar">
+      <span>考试范围：</span>
+      <button class="level-chip" data-lv="4" onclick="App.setLevel(4)">四级</button>
+      <button class="level-chip" data-lv="6" onclick="App.setLevel(6)">六级</button>
+      <button class="level-chip" data-lv="both" onclick="App.setLevel('both')">全选</button>
+    </div>
+  </section>
+
+  <!-- 初始测试 -->
+  <section id="view-placement" class="view">
+    <div class="step-head">
+      <div class="step-tag">入学测试</div>
+      <div class="step-progress" id="placeProgress"></div>
+    </div>
+    <div class="quiz-card">
+      <div class="quiz-hint">这个单词你认识吗？</div>
+      <div class="word-display" id="placeWord">—</div>
+      <div class="ipa-line" id="placeIpa"></div>
+      <button class="speak-btn" onclick="App.speak()">🔊 发音</button>
+    </div>
+    <div class="answer-actions" id="placeActions">
+      <button class="btn btn-ghost" onclick="App.placeAnswer(false)">不认识</button>
+      <button class="btn btn-primary" onclick="App.placeAnswer(true)">认识</button>
+    </div>
+    <p class="tip">根据你的回答，自动跳过已掌握的简单词。</p>
+  </section>
+
+  <!-- 测验 -->
+  <section id="view-quiz" class="view">
+    <div class="step-head">
+      <div class="step-tag" id="quizTag">认识测验</div>
+      <div class="step-progress" id="quizProgress"></div>
+    </div>
+    <div class="quiz-card" id="quizCard">
+      <div class="quiz-hint" id="quizHint">这个单词你认识吗？</div>
+      <div class="word-display" id="quizWord">—</div>
+      <div class="ipa-line" id="quizIpa"></div>
+      <button class="speak-btn" onclick="App.speak()">🔊 发音</button>
+
+      <!-- 拼写输入 -->
+      <div class="spell-box" id="spellBox" style="display:none">
+        <input type="text" id="spellInput" placeholder="输入英文单词" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button class="btn btn-primary" onclick="App.checkSpell()">提交</button>
+      </div>
+
+      <!-- 答案区 -->
+      <div class="answer-reveal" id="answerReveal" style="display:none">
+        <div class="divider"></div>
+        <div class="answer-mean" id="answerMean"></div>
+        <div class="phrase-box" id="answerPhrases" style="display:none"></div>
+        <div class="answer-ex" id="answerEx"></div>
+        <div class="freq-badge" id="answerFreq"></div>
+      </div>
+    </div>
+
+    <div class="answer-actions" id="quizActions">
+      <button class="btn btn-ghost" onclick="App.answer(false)">不认识</button>
+      <button class="btn btn-primary" onclick="App.answer(true)">认识</button>
+    </div>
+    <div class="answer-actions" id="revealActions" style="display:none">
+      <button class="btn btn-skip" onclick="App.markTooEasy()">太简单，跳过</button>
+      <button class="btn btn-primary" onclick="App.nextWord()">下一个 →</button>
+    </div>
+    <p class="tip" id="quizTip"></p>
+  </section>
+
+  <!-- 错题本 -->
+  <section id="view-wrongbook" class="view">
+    <div class="section-title">📕 我的错题本</div>
+    <p class="section-sub">按遗忘曲线优先复习：近期错误与长期遗忘的词排前面</p>
+    <div id="wrongList" class="wrong-list"></div>
+    <div class="fixed-bottom">
+      <button class="btn btn-primary wide" onclick="App.startQuiz('wrong')" id="reviewBtn">开始强化复习</button>
+    </div>
+  </section>
+
+  <!-- 看板 -->
+  <section id="view-dashboard" class="view">
+    <div class="section-title">📊 学习看板</div>
+    <div id="dashCards" class="dash-cards"></div>
+    <div class="section-title small">近 7 天学习</div>
+    <div id="dashChart" class="dash-chart"></div>
+    <div class="section-title small">打卡日历</div>
+    <div id="dashCalendar" class="calendar"></div>
+  </section>
+
+  <!-- 设置 -->
+  <section id="view-settings" class="view">
+    <div class="section-title">⚙️ 设置</div>
+    <div class="settings-group">
+      <div class="setting-row">
+        <div><div class="setting-name">考试范围</div><div class="setting-desc">切换后词库即时生效</div></div>
+        <div class="seg">
+          <button data-lv="4" onclick="App.setLevel(4)">四级</button>
+          <button data-lv="6" onclick="App.setLevel(6)">六级</button>
+          <button data-lv="both" onclick="App.setLevel('both')">全选</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-name">重新进行入学测试</div><div class="setting-desc">重新评估词量，调整跳词阈值</div></div>
+        <button class="btn btn-ghost" onclick="App.resetPlacement()">重测</button>
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-name">导出学习进度</div><div class="setting-desc">备份错题本、掌握情况、打卡记录</div></div>
+        <button class="btn btn-ghost" onclick="App.exportData()">导出</button>
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-name">导入学习进度</div><div class="setting-desc">从备份 JSON 恢复</div></div>
+        <label class="btn btn-ghost file-label">导入<input type="file" id="importFile" accept=".json" onchange="App.importData(event)"></label>
+      </div>
+      <div class="setting-row danger">
+        <div><div class="setting-name">清空所有数据</div><div class="setting-desc">不可恢复，请谨慎</div></div>
+        <button class="btn btn-danger" onclick="App.clearAll()">清空</button>
+      </div>
+    </div>
+    <p class="about">词频通 · 数据来源 KyleBing/english-vocabulary、dictionaryapi.dev、Google 词频表。按 Google 词频近似排序作为考频参考。</p>
+  </section>
+
+  <!-- 底部导航 -->
+  <nav class="bottom-nav">
+    <button onclick="App.go('home')" data-nav="home"><span>🏠</span>首页</button>
+    <button onclick="App.startQuiz('normal')" data-nav="quiz"><span>🎯</span>测验</button>
+    <button onclick="App.go('wrongbook')" data-nav="wrongbook"><span>📕</span>错题本</button>
+    <button onclick="App.go('dashboard')" data-nav="dashboard"><span>📊</span>看板</button>
+  </nav>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
