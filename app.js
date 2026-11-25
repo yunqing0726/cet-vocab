@@ -29,7 +29,14 @@ var S = {
   placeAnswers: [],
   theta: 0,              // 能力值（log10 词频刻度）：越大=认识越生僻的词
   thetaN: 0,             // 已用于更新的答题次数（决定每次更新的步长）
-  adaptiveLog: []         // [{ts, theta, known, w}] 能力变化轨迹（调试/展示用）
+  adaptiveLog: [],       // [{ts, theta, known, w}] 能力变化轨迹（调试/展示用）
+  /* 下面这些必须在这里声明：load() 只认识 S 里已有的键，
+     以前没声明 → 每次刷新/更新版本都被丢掉，题目就从 address 从头开始 */
+  adaptiveSeen: {},      // word -> ts 做过的时间（永久，不再 7 天过期）
+  learned: {},           // word -> {n, ok, first, last} 永久学习账本（每题都记）
+  batchCursor: 0,        // 顺序选题游标（拼写测验用）
+  batchNo: 0,            // 第几套
+  lastResult: null       // 上一套结算
 };
 
 function load(){
@@ -38,12 +45,29 @@ function load(){
     if(raw){
       var o = JSON.parse(raw);
       for(var k in S){ if(o[k]!==undefined) S[k]=o[k]; }
+      // 关键：把存档里「S 没声明」的字段也带进来，避免以后加字段又被丢
+      for(var k2 in o){ if(!(k2 in S)) S[k2]=o[k2]; }
       // 迁移：旧的 tooEasy 是 true，转成时间戳
       if(!Array.isArray(S.tooEasyLog)) S.tooEasyLog=[];
       Object.keys(S.tooEasy).forEach(function(w){
         if(S.tooEasy[w]===true){ S.tooEasy[w]=Date.now(); S.tooEasyLog.push({w:w,ts:S.tooEasy[w]}); }
       });
       if(!Array.isArray(S.wrongLog)) S.wrongLog=[];
+      if(!S.adaptiveSeen || typeof S.adaptiveSeen!=='object') S.adaptiveSeen={};
+      if(!S.learned || typeof S.learned!=='object') S.learned={};
+      // 老数据：把 wrong/mastered 回填进学习账本，保证「做过的词」跨版本不丢
+      Object.keys(S.wrong).forEach(function(w){
+        if(!S.learned[w]) S.learned[w]={n:S.wrong[w].n||1, ok:0, first:S.wrong[w].first||Date.now(), last:S.wrong[w].last||Date.now()};
+      });
+      Object.keys(S.mastered).forEach(function(w){
+        if(!S.learned[w]) S.learned[w]={n:S.mastered[w].n||1, ok:S.mastered[w].n||1, first:Date.now(), last:Date.now()};
+      });
+      // 能力值兜底：老存档没有 theta（=0）时，用跳过阈值反推一个合理初值，
+      // 否则 θ=0 会被算成「只认识最简单的词」，选题永远从词库最前面开始。
+      if(!S.thetaN && S.placementDone && S.skipThreshold>0 && !(S.theta>0.2)){
+        S.theta=Math.log(S.skipThreshold)/Math.LN10+0.5;
+        S.thetaN=Math.max(10, Object.keys(S.learned).length);
+      }
     }
   }catch(e){}
 }
@@ -448,7 +472,13 @@ function pickAdaptive(type, size){
     // 重点 × 预测不会；同时给「刚好卡在 30% 认识率」的词一点加成（最有学习价值）
     var s=imp*(1-p);
     s+=0.35*Math.exp(-Math.pow((p-0.30)/0.25,2));
-    if(seen[w.w]) s*=0.45;                        // 最近做过的强降权
+    // 做过的词：认识的永久降权（不再重复考），不认识的保留但降低权重
+    var lb=S.learned&&S.learned[w.w];
+    if(lb){
+      if(lb.ok>0 && lb.ok>=lb.n*0.6) s*=0.05;      // 大多答对 → 基本不再出
+      else s*=0.5;
+    }
+    if(seen[w.w]) s*=0.75;
     return {w:w, s:s, p:p, imp:imp, f:(w.f||99999)};
   });
   // 到期错题优先（FSRS）
@@ -481,11 +511,9 @@ function pickAdaptive(type, size){
       if(picked.length<size && picked.indexOf(x.w)<0) picked.push(x.w);
     });
   }
-  // 记录已见（7 天内降权）
+  // 记录已见（永久保留，不再按 7 天清理；做题记录是学习的资产）
   S.adaptiveSeen=S.adaptiveSeen||{};
   picked.forEach(function(w){ S.adaptiveSeen[w.w]=ts(); });
-  var cut=ts()-7*86400000;
-  Object.keys(S.adaptiveSeen).forEach(function(k){ if(S.adaptiveSeen[k]<cut) delete S.adaptiveSeen[k]; });
   return shuffle(picked.slice(0,size)).sort(function(a,b){ return (a.f||99999)-(b.f||99999); });
 }
 /* 供 UI 用：当前模型认为「最值得优先攻克」的重点词前 N 个。
@@ -687,6 +715,10 @@ function reveal(known){
   day.total++; if(known) day.correct++;
   if(!S.mastered[w.w]||S.mastered[w.w].n===1) day.new++;
   S.daily[d]=day; updateStreak();
+  // 永久学习账本：每个做过的词都记（跨版本不丢，选题靠它避开做过的词）
+  var lb=S.learned[w.w]||{n:0, ok:0, first:ts(), last:0};
+  lb.n++; if(known) lb.ok++; lb.last=ts();
+  S.learned[w.w]=lb;
   // 自适应：每答一题都更新能力值（只有主轮计入，重测轮是对同批词的强化，不重复算能力）
   if(ss.mode==='main' && (ss.type==='normal'||ss.type==='wrong')) updateTheta(known, w);
   save();
@@ -947,22 +979,212 @@ function exportData(){
   var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download='cet-vocab-backup-'+today()+'.json'; a.click(); toast('已导出备份文件');
 }
+
+/* ---------- 导入（兼容旧版备份 + 手机粘贴） ----------
+   旧备份可能缺字段：没有 theta/thetaN/adaptiveLog、tooEasy 的值是 true、
+   错题记录没有 FSRS 的 S/D、用 placeQueue 而不是 placePool。
+   这里统一做一次归一化，缺什么补什么，保证导入后不会把新逻辑弄崩。 */
+function normalizeBackup(o){
+  if(!o || typeof o!=='object') throw new Error('不是有效的备份内容');
+  var out={};
+  // 词库范围 / 打卡
+  if(o.level!==undefined) out.level=o.level;
+  if(o.accent!==undefined) out.accent=o.accent;
+  if(o.streak!==undefined) out.streak=o.streak;
+  if(o.lastActive!==undefined) out.lastActive=o.lastActive;
+  if(o.vocabSize!==undefined) out.vocabSize=o.vocabSize;
+  if(o.placementDone!==undefined) out.placementDone=o.placementDone;
+  if(o.skipThreshold!==undefined) out.skipThreshold=o.skipThreshold;
+
+  // 已掌握
+  if(o.mastered && typeof o.mastered==='object'){
+    out.mastered={};
+    Object.keys(o.mastered).forEach(function(k){
+      var v=o.mastered[k];
+      out.mastered[k]=(typeof v==='number')?{n:v}:(v&&typeof v==='object')?{n:v.n||1}:{n:1};
+    });
+  }
+
+  // 太简单：旧版是 true，新版是时间戳
+  if(o.tooEasy && typeof o.tooEasy==='object'){
+    out.tooEasy={};
+    Object.keys(o.tooEasy).forEach(function(k){
+      var v=o.tooEasy[k];
+      out.tooEasy[k]=(v===true)?Date.now():(typeof v==='number'?v:Date.now());
+    });
+  }
+  if(Array.isArray(o.tooEasyLog)) out.tooEasyLog=o.tooEasyLog.slice();
+
+  // 错题本：补 FSRS 的 S/D
+  if(o.wrong && typeof o.wrong==='object'){
+    out.wrong={};
+    Object.keys(o.wrong).forEach(function(k){
+      var v=o.wrong[k]||{};
+      out.wrong[k]={
+        n:v.n||1,
+        rep:v.rep||0,
+        first:v.first||Date.now(),
+        last:v.last||v.first||Date.now(),
+        level:v.level,
+        S:(typeof v.S==='number'&&v.S>0)?v.S:0.5,
+        D:(typeof v.D==='number'&&v.D>=1)?v.D:5
+      };
+    });
+  }
+  if(Array.isArray(o.wrongLog)) out.wrongLog=o.wrongLog.slice();
+  if(o.daily && typeof o.daily==='object') out.daily=o.daily;
+  // 自适应能力值：旧备份没有，重算一个保守初值
+  if(typeof o.theta==='number') out.theta=o.theta;
+  if(typeof o.thetaN==='number') out.thetaN=o.thetaN;
+  if(Array.isArray(o.adaptiveLog)) out.adaptiveLog=o.adaptiveLog.slice();
+  // 测试进度（旧版用 placeQueue）
+  if(Array.isArray(o.placePool)) out.placePool=o.placePool;
+  else if(Array.isArray(o.placeQueue)) out.placePool=o.placeQueue;
+  if(o.placeIdx!==undefined) out.placeIdx=o.placeIdx;
+  if(o.placeCorrect!==undefined) out.placeCorrect=o.placeCorrect;
+  if(Array.isArray(o.placeAnswers)) out.placeAnswers=o.placeAnswers;
+  if(o.placeAsked) out.placeAsked=o.placeAsked;
+  return out;
+}
+/* 把归一化后的备份并进当前状态：词条级合并，不丢当前进度 */
+function mergeBackup(inc){
+  var added={mastered:0, wrong:0, tooEasy:0, daily:0};
+  if(inc.mastered) Object.keys(inc.mastered).forEach(function(k){
+    if(!S.mastered[k]){ S.mastered[k]=inc.mastered[k]; added.mastered++; }
+    else if((inc.mastered[k].n||0)>(S.mastered[k].n||0)) S.mastered[k].n=inc.mastered[k].n;
+  });
+  if(inc.wrong) Object.keys(inc.wrong).forEach(function(k){
+    var a=inc.wrong[k], b=S.wrong[k];
+    if(!b){ S.wrong[k]=a; added.wrong++; }
+    else{
+      // 同词取「更该复习」的那条：错得多的优先，其次 S 小的（更不牢）
+      if((a.n||0)>(b.n||0) || ((a.n||0)===(b.n||0) && (a.S||0.5)<(b.S||0.5))){
+        S.wrong[k]=a; added.wrong++;
+      }
+    }
+  });
+  if(inc.tooEasy) Object.keys(inc.tooEasy).forEach(function(k){
+    if(!S.tooEasy[k]){ S.tooEasy[k]=inc.tooEasy[k]; added.tooEasy++; }
+  });
+  if(inc.daily) Object.keys(inc.daily).forEach(function(k){
+    var a=inc.daily[k], b=S.daily[k];
+    if(!b){ S.daily[k]=a; added.daily++; }
+    else{
+      b.new=Math.max(b.new||0,a.new||0);
+      b.correct=Math.max(b.correct||0,a.correct||0);
+      b.total=Math.max(b.total||0,a.total||0);
+    }
+  });
+  // 日志类：按内容去重合并
+  function mergeLog(key, idFn){
+    if(!Array.isArray(inc[key])) return;
+    S[key]=S[key]||[];
+    var seen={};
+    S[key].forEach(function(it){ seen[idFn(it)]=1; });
+    inc[key].forEach(function(it){ var id=idFn(it); if(!seen[id]){ seen[id]=1; S[key].push(it); } });
+    S[key].sort(function(a,b){ return (a.ts||0)-(b.ts||0); });
+  }
+  mergeLog('tooEasyLog', function(it){ return it.w+'|'+it.ts; });
+  mergeLog('wrongLog', function(it){ return it.w+'|'+it.ts; });
+  if(inc.adaptiveLog && inc.adaptiveLog.length){
+    if(!S.adaptiveLog || !S.adaptiveLog.length) S.adaptiveLog=inc.adaptiveLog.slice();
+  }
+  // 标量：取更「有信息量」的值
+  if(inc.level && !S.level) S.level=inc.level;
+  if(inc.accent!==undefined && !S.accent) S.accent=inc.accent;
+  S.streak=Math.max(S.streak||0, inc.streak||0);
+  if(inc.lastActive && (!S.lastActive || inc.lastActive>S.lastActive)) S.lastActive=inc.lastActive;
+  if(inc.vocabSize && !S.vocabSize) S.vocabSize=inc.vocabSize;
+  if(inc.placementDone && !S.placementDone){
+    S.placementDone=true;
+    if(inc.skipThreshold!==undefined) S.skipThreshold=inc.skipThreshold;
+    if(inc.vocabSize) S.vocabSize=inc.vocabSize;
+  }
+  if(typeof inc.theta==='number' && (!S.thetaN || S.thetaN===0)){ S.theta=inc.theta; S.thetaN=inc.thetaN||0; }
+  return added;
+}
+/* 覆盖式导入：完全用备份替换（保留当前词库范围） */
+function replaceBackup(inc){
+  var lv=S.level, acc=S.accent;
+  var fresh=blankState();
+  fresh.level=lv; fresh.accent=acc;
+  for(var k in fresh){ if(inc[k]!==undefined) fresh[k]=inc[k]; }
+  S=fresh;
+  return {mastered:Object.keys(S.mastered).length, wrong:Object.keys(S.wrong).length,
+          tooEasy:Object.keys(S.tooEasy).length, daily:Object.keys(S.daily).length};
+}
+var pendingImport=null;   // 待确认的导入内容
+function importFromText(text, mode){
+  var raw=String(text||'').trim();
+  if(!raw){ toast('没有可导入的内容'); return; }
+  var obj=null;
+  // 1) 先按 JSON 解析（备份文件）
+  try{ obj=JSON.parse(raw); }catch(e){ obj=null; }
+  // 2) 不是 JSON → 当成「一行一个单词」的清单，标记为已掌握
+  if(!obj){
+    var words=raw.split(/[\s,，、;；]+/).map(function(x){ return x.trim(); }).filter(Boolean);
+    var known={}, hit=0;
+    ALL.forEach(function(w){ known[w.w.toLowerCase()]=w; });
+    var added=0;
+    words.forEach(function(x){
+      var w=known[x.toLowerCase()]; if(!w) return;
+      hit++;
+      if(!S.mastered[w.w]){ S.mastered[w.w]={n:1}; added++; }
+    });
+    if(!hit){ toast('没认出可导入的单词，请检查内容'); return; }
+    S.placementDone=S.placementDone||true;
+    save(); renderHome();
+    toast('已导入 '+added+' 个词（清单里 '+hit+' 个能对上词库）');
+    return;
+  }
+  var inc=normalizeBackup(obj);
+  var cnt={mastered:0,wrong:0,tooEasy:0,daily:0};
+  if(mode==='replace') cnt=replaceBackup(inc);
+  else cnt=mergeBackup(inc);
+  save(); renderHome();
+  toast('导入完成：掌握 '+cnt.mastered+' · 错题 '+cnt.wrong+' · 太简单 '+cnt.tooEasy+' · 打卡 '+cnt.daily+' 天');
+  go('home');
+}
 function importData(e){
   var f=e.target.files[0]; if(!f) return;
   var r=new FileReader();
-  r.onload=function(){
-    try{ var o=JSON.parse(r.result); for(var k in S){ if(o[k]!==undefined) S[k]=o[k]; } save(); toast('导入成功'); go('home'); }
-    catch(err){ toast('导入失败：文件格式错误'); }
-  };
+  r.onload=function(){ importFromText(r.result, 'merge'); };
+  r.onerror=function(){ toast('文件读取失败'); };
   r.readAsText(f); e.target.value='';
+}
+function openImport(){
+  var box=document.getElementById('importBox');
+  if(!box) return;
+  var on=box.style.display!=='none';
+  box.style.display=on?'none':'block';
+  if(!on){
+    box.scrollIntoView({behavior:'smooth',block:'center'});
+    setTimeout(function(){ var ta=document.getElementById('importText'); if(ta) ta.focus(); },300);
+  }
+}
+function doPasteImport(){
+  var ta=document.getElementById('importText');
+  var mode=(document.getElementById('importMode')||{}).value||'merge';
+  if(!ta) return;
+  importFromText(ta.value, mode);
+  ta.value='';
+  var box=document.getElementById('importBox'); if(box) box.style.display='none';
+}
+/* 全新的空状态（clearAll 和首次进入都用它，保证字段齐全） */
+function blankState(){
+  return {level:'both',placementDone:false,skipThreshold:0,vocabSize:0,
+    mastered:{},tooEasy:{},tooEasyLog:[],wrong:{},wrongLog:[],daily:{},streak:0,
+    accent:2,lastActive:'',session:null,current:null,
+    placePool:[],placeAsked:{},placeIdx:0,placeCorrect:0,placeAnswers:[],
+    theta:0,thetaN:0,adaptiveLog:[],adaptiveSeen:{},learned:{},
+    batchCursor:0,batchNo:0,lastResult:null};
 }
 function clearAll(){
   if(!confirm('确定清空所有学习数据？此操作不可恢复！')) return;
   if(!confirm('再次确认：真的要删除全部错题本和进度吗？')) return;
   localStorage.removeItem(LS);
-  S={level:'both',placementDone:false,skipThreshold:0,mastered:{},tooEasy:{},tooEasyLog:[],
-     wrong:{},wrongLog:[],daily:{},streak:0,accent:2,lastActive:'',session:null,current:null,
-     placeQueue:[], placePool:[], placeAsked:{}, placeIdx:0, placeCorrect:0, placeAnswers:[], vocabSize:0 };
+  var lv=S.level||'both', acc=S.accent||2;
+  S=blankState(); S.level=lv; S.accent=acc;
   save(); toast('已清空'); go('home');
 }
 
@@ -975,7 +1197,8 @@ window.App={
   setWrongRange:setWrongRange, setWrongBrowse:setWrongBrowse, browseMonthShift:browseMonthShift,
   reviewWrong:reviewWrong, toggleNote:toggleNote, finishOverview:finishOverview, finishQuiz:finishQuiz,
   nextBatch:nextBatch, speakWord:speakWord,
-  resetPlacement:resetPlacement, exportData:exportData, importData:importData, clearAll:clearAll
+  resetPlacement:resetPlacement, exportData:exportData, importData:importData, clearAll:clearAll,
+  openImport:openImport, doPasteImport:doPasteImport
 };
 if(location.search.indexOf('test=1')>=0){
   window.App._setCurrent=function(w){ S.current=w; };
