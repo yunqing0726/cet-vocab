@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#f6f2e9">
 <title>词频通 · 四六级词汇手册</title>
-<link rel="stylesheet" href="style.css?v=20261125g">
+<link rel="stylesheet" href="style.css?v=20261125h">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 </head>
@@ -99,8 +99,8 @@
       <span class="step-tag">入学测试</span>
       <span class="step-progress" id="placeProgress"></span>
     </div>
-    <div class="quiz-card">
-      <div class="quiz-hint">这个词，你认识吗？</div>
+    <div class="quiz-card" id="placeCard">
+      <div class="quiz-hint" id="placeHint">这个词，你认识吗？</div>
       <div class="word-display" id="placeWord">—</div>
       <div class="ipa-line" id="placeIpa"></div>
       <div class="speak-row">
@@ -108,11 +108,12 @@
         <button class="speak-btn" onclick="App.speak()"><svg><use href="#i-sound"/></svg>听发音</button>
       </div>
     </div>
+    <div id="placeResult" class="place-result" style="display:none"></div>
     <div class="answer-actions" id="placeActions">
       <button class="btn btn-ghost" onclick="App.placeAnswer(false)">不认识</button>
       <button class="btn btn-primary" onclick="App.placeAnswer(true)">认识</button>
     </div>
-    <p class="tip">根据你的回答，自动略过已掌握的简单词。</p>
+    <p class="tip" id="placeTip">根据你的回答，自动略过已掌握的简单词。</p>
   </section>
 
   <!-- 测验 -->
@@ -257,7 +258,7 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="data.js?v=20261125g"></script>
-<script src="app.js?v=20261125g"></script>
+<script src="data.js?v=20261125h"></script>
+<script src="app.js?v=20261125h"></script>
 </body>
 </html>

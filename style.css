@@ -248,3 +248,11 @@ svg{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.7;st
 .bs-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
 .bs-actions .btn{padding:12px 24px;font-size:15px}
 
+/* 词汇量测试结果 */
+.place-result{padding:40px 24px;text-align:center}
+.pr-big{font-family:var(--serif);font-size:56px;font-weight:700;color:var(--red);line-height:1}
+.pr-unit{font-size:14px;color:var(--ink-soft);margin-top:8px;letter-spacing:.5px}
+.pr-sub{font-size:13px;color:var(--ink-soft);margin:20px 0 28px}
+.place-result .btn{margin:6px auto}
+
+

@@ -10,6 +10,7 @@ var S = {
   level: 'both',
   placementDone: false,
   skipThreshold: 0,
+  vocabSize: 0,          // 入学测试估算的词汇量（词频排名近似）
   mastered: {},          // word -> {n}
   tooEasy: {},           // word -> ts（加入时间）
   tooEasyLog: [],        // [{w, ts}] 按时间，最新在后
@@ -21,7 +22,8 @@ var S = {
   lastActive: '',
   session: null,         // 当前测验（持久化，切页/刷新不变）
   current: null,
-  placeQueue: [],
+  placePool: [],         // 词汇量测试候选词池（按难度升序）
+  placeAsked: {},        // word -> true（已问过）
   placeIdx: 0,
   placeCorrect: 0,
   placeAnswers: []
@@ -151,8 +153,9 @@ function renderHome(){
   document.getElementById('wrongCount').textContent=wrongN?wrongN+' 个待强化':'遗忘曲线强化';
   var masteredN=Object.keys(S.mastered).length;
   var teN=Object.keys(S.tooEasy).length;
+  var vocabTxt = S.vocabSize ? (S.vocabSize>=99999?'≥2万':('≈'+S.vocabSize)) : '—';
   document.getElementById('homeStats').innerHTML=
-    '<div class="hstat"><b>'+masteredN+'</b><span>已掌握</span></div>'+
+    '<div class="hstat"><b>'+vocabTxt+'</b><span>词汇量</span></div>'+
     '<div class="hstat"><b>'+wrongN+'</b><span>错题本</span></div>'+
     '<div class="hstat"><b>'+S.streak+'</b><span>连续打卡</span></div>';
   var teStat=document.getElementById('tooEasyStat');
@@ -165,68 +168,124 @@ function setLevel(lv){
   renderHome(); toast('已切换范围：'+(lv==='both'?'四级+六级':lv+'级'));
 }
 
-/* ---------- 入学测试 ---------- */
-var PLACE_TOTAL=100, PLACE_BANDS=10, PLACE_PER_BAND=10;
+/* ---------- 词汇量测试（词频分带抽样 + 反S曲线拟合） ----------
+   参考：Paul Nation VST 词频分带 + Neural Pensieve 的反 S 曲线（逻辑斯蒂）拟合。
+   思路：把词按词频升序（f 越小越常见），在对数域上把「认识概率」拟合成
+   P(认识)=1/(1+exp((log f - μ)/σ))，μ 处认识概率 50% 即「词汇量边界」。
+   相比旧的「累计正确率首次跌破 0.7」边界法，拟合更平滑、抗单题运气。 */
+var PLACE_BANDS=8, PLACE_PER_BAND=4;      // 8 带 × 4 词 = 32 题
+var PLACE_MAX=8;                          // 上限：认为词量 ≥ 约 2 万
+function placementPool(){
+  // 只用有真实词频的词做估算（f<90000 表示有 Google 词频排名，99999 是「无排名」哨兵值）
+  return trainedPool().filter(function(w){ return w.f>0 && w.f<90000; })
+    .slice().sort(function(a,b){ return (a.f||0)-(b.f||0); });
+}
 function startPlacement(){
-  var p=freqSorted(); var sample=[];
-  if(p.length>=PLACE_TOTAL){
-    for(var band=0;band<PLACE_BANDS;band++){
-      var lo=Math.floor(band*p.length/PLACE_BANDS), hi=Math.floor((band+1)*p.length/PLACE_BANDS);
-      var seg=p.slice(lo,hi); shuffle(seg);
+  // 先清阈值再建词池，否则重测时旧 skipThreshold 会把简单词过滤掉，样本偏难
+  S.placementDone=false; S.skipThreshold=0;
+  var pool=placementPool(), sample=[];
+  if(pool.length>=8){
+    // 等量分带：排序后按词频均分 8 段（在词频对数分布下等效于对数分带）
+    for(var band=0; band<PLACE_BANDS; band++){
+      var lo=Math.floor(band*pool.length/PLACE_BANDS), hi=Math.floor((band+1)*pool.length/PLACE_BANDS);
+      var seg=pool.slice(lo,hi); shuffle(seg);
       sample=sample.concat(seg.slice(0,PLACE_PER_BAND));
     }
-  }else sample=p.slice();
+  }else{ sample=pool.slice(); shuffle(sample); }
   shuffle(sample);
-  S.placeQueue=sample; S.placeIdx=0; S.placeCorrect=0; S.placeAnswers=[];
+  S.placePool=sample; S.placeAsked={}; S.placeIdx=0; S.placeCorrect=0; S.placeAnswers=[];
   S.session={type:'placement'}; save();
   go('placement'); showPlace();
-}
-function showPlace(){
-  var w=S.placeQueue[S.placeIdx];
-  if(!w){ finishPlacement(); return; }
-  S.current=w; preloadAudio(w); autoSpeak(w);
-  document.getElementById('placeProgress').textContent=(S.placeIdx+1)+' / '+S.placeQueue.length;
-  document.getElementById('placeWord').textContent=w.w;
-  fitWord(document.getElementById('placeWord'));
-  document.getElementById('placeIpa').textContent=w.ipa||'';
 }
 function placeAnswer(known){
   if(known) S.placeCorrect++;
   S.placeAnswers=S.placeAnswers||[];
-  S.placeAnswers.push({f:S.current.f||99999, ok:!!known});
+  S.placeAnswers.push({f:S.current.f||2, ok:!!known});
   S.placeIdx++; save(); showPlace();
+}
+/* 逻辑斯蒂拟合：网格搜索使似然最大的 (μ, σ)。
+   points: [{x:log10(f), y:0|1}]，x 越大=词越生僻=越不可能认识 */
+function fitLogistic(points){
+  if(!points.length) return {u:2.3, s:1.0};
+  var uBest=2.3, sBest=1.0, best=-Infinity;
+  for(var u=0.3; u<=4.4; u+=0.05){
+    for(var s=0.25; s<=2.0; s+=0.05){
+      var ll=0;
+      for(var i=0;i<points.length;i++){
+        var z=Math.max(-50, Math.min(50, (points[i].x-u)/s));
+        var p=1/(1+Math.exp(z));
+        ll += points[i].y*Math.log(p+1e-9) + (1-points[i].y)*Math.log(1-p+1e-9);
+      }
+      if(ll>best){ best=ll; uBest=u; sBest=s; }
+    }
+  }
+  return {u:uBest, s:sBest};
 }
 function finishPlacement(){
   S.placementDone=true;
-  var ans=(S.placeAnswers||[]).slice().sort(function(a,b){ return a.f-b.f; });
-  var boundary=0;
-  if(ans.length){
-    var cum=0,n=0;
-    for(var i=0;i<ans.length;i++){
-      n++; if(ans[i].ok) cum++;
-      if(cum/n<0.7){ boundary=ans[i].f; break; }
-      boundary=ans[i].f;
-    }
-  }
-  var proposed=Math.max(0,Math.round(boundary||0));
-  // 关键：计算「保底保留 50% 词」时，必须用不受 skipThreshold 影响的完整词池，
-  // 否则如果全部答对，proposed=99999 会把词库整个过滤空（测验无词可用）。
-  var keepSkip=S.skipThreshold;
-  S.skipThreshold=0;
-  var sorted=freqSorted();
-  S.skipThreshold=keepSkip;
+  var ans=(S.placeAnswers||[]).filter(function(a){ return a.f>0 && a.f<90000; });
+  var pts=ans.map(function(a){ return {x:Math.log(a.f)/Math.LN10, y:a.ok?1:0}; });
+  var fit=fitLogistic(pts);
+  var u0=fit.u, s=Math.max(0.3, fit.s);
+  var vocabSize=Math.round(Math.pow(10,u0));          // 50% 边界 = 估计词汇量
+  var allKnown=ans.length>0 && ans.every(function(a){ return a.ok; });
+  var allUnknown=ans.length>0 && ans.every(function(a){ return !a.ok; });
+  // skip 阈值取「认识概率 0.7」处：u70 = u0 - ln(0.7/0.3)·s ≈ u0 - 0.847s
+  var u70=u0 - 0.847*s;
+  var proposed=Math.max(0, Math.round(Math.pow(10,u70)));
+  if(allKnown){ proposed=99999; vocabSize=99999; }    // 全认识：跳过全部词
+  if(allUnknown){ proposed=0; vocabSize=Math.round(Math.pow(10,u0)); }
+  // 保底：至少保留 50% 词可背（不受 skipThreshold 影响，用完整词池算上限）
+  var keepSkip=S.skipThreshold; S.skipThreshold=0; var sorted=freqSorted(); S.skipThreshold=keepSkip;
   if(sorted.length){
     var capIndex=Math.floor(sorted.length*0.5);
     var maxAllowed=sorted[Math.min(capIndex,sorted.length-1)].f;
-    // 若词频字段无法区分（如全部相同），就不跳过任何词，保证有词可背
     if(maxAllowed>=sorted[sorted.length-1].f) proposed=0;
     else if(proposed>maxAllowed) proposed=maxAllowed;
   }else proposed=0;
   S.skipThreshold=proposed;
-  var rate=Math.round(S.placeCorrect/Math.max(1,S.placeQueue.length)*100);
+  S.vocabSize=vocabSize;
+  var rate=Math.round(S.placeCorrect/Math.max(1,S.placePool.length)*100);
   S.session=null; save();
-  toast('测试完成！正确率 '+rate+'%，将跳过词频前 '+S.skipThreshold+' 的已掌握词');
-  go('home');
+  showPlaceResult(vocabSize, rate, ans.length);
+}
+function showPlaceResult(vocabSize, rate, asked){
+  var box=document.getElementById('placeResult');
+  var wordEl=document.getElementById('placeWord'); if(wordEl) wordEl.style.display='none';
+  var ipaEl=document.getElementById('placeIpa'); if(ipaEl) ipaEl.style.display='none';
+  var actions=document.getElementById('placeActions'); if(actions) actions.style.display='none';
+  var card=document.getElementById('placeCard'); if(card) card.style.display='none';
+  var hint=document.getElementById('placeHint'); if(hint) hint.style.display='none';
+  var tip=document.getElementById('placeTip'); if(tip) tip.style.display='none';
+  var prog=document.getElementById('placeProgress'); if(prog) prog.textContent='完成';
+  var sizeText = vocabSize>=99999 ? '≥ 20000' : ('≈ '+vocabSize);
+  if(box){
+    box.innerHTML =
+      '<div class="pr-big">'+sizeText+'</div>'+
+      '<div class="pr-unit">个单词（按词频估算）</div>'+
+      '<div class="pr-sub">本次问了 '+asked+' 个词，正确率 '+rate+'%</div>'+
+      '<button class="btn btn-primary wide" onclick="App.go(\'home\')">开始学习<svg class="btn-ic"><use href="#i-arrow"/></svg></button>'+
+      '<button class="btn btn-ghost wide" onclick="App.resetPlacement()">重新测试</button>';
+    box.style.display='block';
+  }
+  toast('词汇量约 '+(vocabSize>=99999?'2万+':vocabSize)+' 词，将跳过词频前 '+S.skipThreshold+' 的已掌握词');
+}
+function showPlace(){
+  // 重置结果/卡片显示，重新开始测试
+  var box=document.getElementById('placeResult'); if(box) box.style.display='none';
+  var wordEl=document.getElementById('placeWord'); if(wordEl) wordEl.style.display='';
+  var ipaEl=document.getElementById('placeIpa'); if(ipaEl) ipaEl.style.display='';
+  var actions=document.getElementById('placeActions'); if(actions) actions.style.display='';
+  var card=document.getElementById('placeCard'); if(card) card.style.display='';
+  var hint=document.getElementById('placeHint'); if(hint) hint.style.display='';
+  var tip=document.getElementById('placeTip'); if(tip) tip.style.display='';
+  var w=S.placePool[S.placeIdx];
+  if(!w){ finishPlacement(); return; }
+  S.current=w; preloadAudio(w); autoSpeak(w);
+  document.getElementById('placeProgress').textContent=(S.placeIdx+1)+' / '+S.placePool.length;
+  document.getElementById('placeWord').textContent=w.w;
+  fitWord(document.getElementById('placeWord'));
+  document.getElementById('placeIpa').textContent=w.ipa||'';
 }
 
 /* ---------- 测验（可持久化、多阶段） ---------- */
@@ -689,7 +748,7 @@ function clearAll(){
   localStorage.removeItem(LS);
   S={level:'both',placementDone:false,skipThreshold:0,mastered:{},tooEasy:{},tooEasyLog:[],
      wrong:{},wrongLog:[],daily:{},streak:0,accent:2,lastActive:'',session:null,current:null,
-     placeQueue:[],placeIdx:0,placeCorrect:0,placeAnswers:[]};
+     placeQueue:[], placePool:[], placeAsked:{}, placeIdx:0, placeCorrect:0, placeAnswers:[], vocabSize:0 };
   save(); toast('已清空'); go('home');
 }
 
@@ -697,7 +756,7 @@ function clearAll(){
 if(location.search.indexOf('test=1')>=0){ window.confirm=function(){return true;}; window.alert=function(){}; }
 window.App={
   go:go, setLevel:setLevel, startQuiz:startQuiz, resumeQuiz:resumeQuiz, restartQuiz:restartQuiz,
-  speak:speak, toggleAccent:toggleAccent, placeAnswer:placeAnswer, answer:answer, checkSpell:checkSpell,
+  startPlacement:startPlacement, speak:speak, toggleAccent:toggleAccent, placeAnswer:placeAnswer, answer:answer, checkSpell:checkSpell,
   nextWord:nextWord, undo:undo, markTooEasy:markTooEasy, undoTooEasy:undoTooEasy,
   setWrongRange:setWrongRange, setWrongBrowse:setWrongBrowse, browseMonthShift:browseMonthShift,
   reviewWrong:reviewWrong, toggleNote:toggleNote, finishOverview:finishOverview, finishQuiz:finishQuiz,
@@ -724,12 +783,12 @@ function boot(){
   if(S.session && S.session.queue && S.session.queue.length && S.session.type!=='placement'){
     go(S.session.mode==='overview'?'overview':'quiz');
     if(S.session.mode==='overview') renderOverview(); else showQuiz();
-  }else if(S.placeQueue && S.placeIdx<S.placeQueue.length && !S.placementDone){
+  }else if(S.placePool && S.placeIdx<S.placePool.length && !S.placementDone){
     go('placement'); showPlace();
   }else{
     go('home');
     if(!S.placementDone){
-      setTimeout(function(){ if(confirm('欢迎使用词频通！开始前需要进行一个 100 题的单词测试，用于精确判断你的词量并跳过已掌握的简单词。现在开始吗？')) startPlacement(); },400);
+      setTimeout(function(){ if(confirm('欢迎使用词频通！开始前需要做一个约 32 题的词汇量测试，估算你的词量并跳过已掌握的简单词。现在开始吗？')) startPlacement(); },400);
     }
   }
   window.scrollTo(0,0);
