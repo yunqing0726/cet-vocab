@@ -66,6 +66,46 @@ function trainedPool(){
 }
 function freqSorted(){ return trainedPool().slice().sort(function(a,b){ return (a.f||99999)-(b.f||99999); }); }
 
+/* ---------- FSRS 记忆模型（间隔重复） ----------
+   参考 open-spaced-repetition/FSRS（Anki 新版 / 墨墨 / 不背单词 同类）。
+   每个错题记录三个量（替换旧的固定 1/2/4/8/16/32 天翻倍）：
+   - 稳定性 S（天）：回忆概率降到 90% 所需的天数，越记越牢则越大
+   - 难度 D（1~10）：越大越难记
+   - 可检索性 R(t)：距上次复习 t 天后还能想起来的概率
+   R(t) = (1 + 19/81 · t/S)^(-0.5)；下次复习间隔由目标回忆率反解。
+   二元评分：认识=成功(Easy)、不认识=失败(Again)。 */
+var FSRS_FACTOR=19/81;      // ≈0.2346
+var FSRS_TARGET_R=0.9;      // 目标保持 90% 回忆率
+var FSRS_W6=0.86;           // 难度更新系数
+var FSRS_W8=1.49, FSRS_W9=0.14, FSRS_W10=0.94;  // 稳定性增长参数（FSRS 默认）
+
+function fsrsR(days,S){
+  S=Math.max(0.3,S||0.5);
+  return Math.pow(1+FSRS_FACTOR*Math.max(0,days)/S,-0.5);
+}
+function fsrsInterval(S,targetR){
+  S=Math.max(0.3,S||0.5);
+  var r=Math.min(0.99,Math.max(0.01,targetR||FSRS_TARGET_R));
+  return S/FSRS_FACTOR*(Math.pow(r,-2)-1);       // 天
+}
+function fsrsUpdate(x,known,days){
+  var S=Math.max(0.3,x.S||0.5);
+  var D=Math.max(1,Math.min(10,x.D||5));
+  var R=fsrsR(days,S);
+  if(known){
+    // 成功：难度下降，稳定性增长（越容易、当前可检索性越低，增益越大）
+    D=Math.max(1,D-FSRS_W6);
+    S=S*(1+Math.exp(FSRS_W8)*(11-D)*Math.pow(S,-FSRS_W9)*(Math.exp(FSRS_W10*(1-R))-1));
+  }else{
+    // 失败：难度上升，稳定性回退（一个曾记住的词被遗忘，降到约 0.6 天）
+    D=Math.min(10,D+2*FSRS_W6);
+    S=Math.max(0.5,S/1.7);
+  }
+  x.S=Math.max(0.3,Math.min(36500,S));
+  x.D=D; x.last=ts();
+  return x;
+}
+
 /* ---------- 视图 ---------- */
 function go(v){
   document.querySelectorAll('.view').forEach(function(el){ el.classList.remove('active'); });
@@ -294,7 +334,7 @@ function wrongDue(){
   return trainedPool().filter(function(w){
     var x=S.wrong[w.w]; if(!x) return false;
     var d=(now-(x.last||x.first))/86400000;
-    var interval=Math.pow(2,Math.min(5,Math.max(0,x.rep||0)));
+    var interval=fsrsInterval(x.S,FSRS_TARGET_R);
     return d>=interval;
   });
 }
@@ -303,7 +343,7 @@ function wrongSorted(){
   return trainedPool().filter(function(w){ return !!S.wrong[w.w]; }).sort(function(a,b){
     var x=S.wrong[a.w],y=S.wrong[b.w];
     var da=(now-(x.last||x.first))/86400000, db=(now-(y.last||y.first))/86400000;
-    var ia=Math.pow(2,Math.min(5,Math.max(0,x.rep||0))), ib=Math.pow(2,Math.min(5,Math.max(0,y.rep||0)));
+    var ia=fsrsInterval(x.S,FSRS_TARGET_R), ib=fsrsInterval(y.S,FSRS_TARGET_R);
     return (db-ib)-(da-ia) || (y.n-x.n);
   });
 }
@@ -460,14 +500,18 @@ function reveal(known){
   var allowed=ss.type==='normal' ? !rec[key] : (!rec.main && !rec.retest);
   if(!known){
     rec[key]=true;
-    var x=S.wrong[w.w]||{n:0,rep:0,first:ts()};
-    if(allowed){ x.n++; x.last=ts(); x.level=w.l; S.wrong[w.w]=x;
-      S.wrongLog.push({w:w.w, ts:ts(), date:today(), type:ss.type}); updateStreak(); }
-    else S.wrong[w.w]=x;
+    var x=S.wrong[w.w]||{n:0,rep:0,first:ts(),S:0.5,D:5};
+    if(allowed){
+      x.n++; x.level=w.l;
+      fsrsUpdate(x, false, (ts()-(x.last||x.first))/86400000);
+      S.wrong[w.w]=x;
+      S.wrongLog.push({w:w.w, ts:ts(), date:today(), type:ss.type}); updateStreak();
+    } else S.wrong[w.w]=x;
     // 加入本轮不认识列表
     if(!ss.unknown.some(function(y){ return y.w===w.w; })) ss.unknown.push(w);
   }else{
-    if(S.wrong[w.w]){ var wx=S.wrong[w.w]; wx.rep=(wx.rep||0)+1; wx.last=ts(); }
+    if(S.wrong[w.w]){ var wx=S.wrong[w.w]; wx.rep=(wx.rep||0)+1;
+      fsrsUpdate(wx, true, (ts()-(wx.last||wx.first))/86400000); }
     var m=S.mastered[w.w]||{n:0}; m.n++; S.mastered[w.w]=m;
     // 从本轮不认识列表移除
     ss.unknown=ss.unknown.filter(function(y){ return y.w!==w.w; });
@@ -615,12 +659,12 @@ function renderWrong(){
   box.innerHTML=list.sort(function(a,b){
     var x=S.wrong[a.w],y=S.wrong[b.w];
     var da=(now-(x.last||x.first))/86400000, db=(now-(y.last||y.first))/86400000;
-    var ia=Math.pow(2,Math.min(5,Math.max(0,x.rep||0))), ib=Math.pow(2,Math.min(5,Math.max(0,y.rep||0)));
+    var ia=fsrsInterval(x.S,FSRS_TARGET_R), ib=fsrsInterval(y.S,FSRS_TARGET_R);
     return (db-ib)-(da-ia)||(y.n-x.n);
   }).map(function(w){
     var x=S.wrong[w.w];
     var days=(now-(x.last||x.first))/86400000;
-    var interval=Math.pow(2,Math.min(5,Math.max(0,x.rep||0)));
+    var interval=fsrsInterval(x.S,FSRS_TARGET_R);
     var overdue=days>=interval;
     var tag=overdue?'<span class="wrong-priority '+(days>interval*2?'forgot':'recent')+'">'+(days>interval*2?'长期遗忘':'待复习')+'</span>':'';
     var mean=(w.m[0]&&w.m[0].t)||'';
