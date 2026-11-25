@@ -1,6 +1,6 @@
 /* 词频通 Service Worker — 离线缓存
    缓存版本升级：改 CACHE 名称即可触发旧缓存清理 */
-var CACHE = 'cet-vocab-v2';
+var CACHE = 'cet-vocab-v3';
 var CORE = [
   './',
   './index.html',

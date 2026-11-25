@@ -208,9 +208,21 @@ function finishPlacement(){
       boundary=ans[i].f;
     }
   }
-  S.skipThreshold=Math.max(0,Math.round(boundary||0));
-  var sorted=freqSorted(); var capIndex=Math.floor(sorted.length*0.5);
-  if(capIndex<sorted.length && S.skipThreshold>sorted[capIndex].f) S.skipThreshold=sorted[capIndex].f;
+  var proposed=Math.max(0,Math.round(boundary||0));
+  // 关键：计算「保底保留 50% 词」时，必须用不受 skipThreshold 影响的完整词池，
+  // 否则如果全部答对，proposed=99999 会把词库整个过滤空（测验无词可用）。
+  var keepSkip=S.skipThreshold;
+  S.skipThreshold=0;
+  var sorted=freqSorted();
+  S.skipThreshold=keepSkip;
+  if(sorted.length){
+    var capIndex=Math.floor(sorted.length*0.5);
+    var maxAllowed=sorted[Math.min(capIndex,sorted.length-1)].f;
+    // 若词频字段无法区分（如全部相同），就不跳过任何词，保证有词可背
+    if(maxAllowed>=sorted[sorted.length-1].f) proposed=0;
+    else if(proposed>maxAllowed) proposed=maxAllowed;
+  }else proposed=0;
+  S.skipThreshold=proposed;
   var rate=Math.round(S.placeCorrect/Math.max(1,S.placeQueue.length)*100);
   S.session=null; save();
   toast('测试完成！正确率 '+rate+'%，将跳过词频前 '+S.skipThreshold+' 的已掌握词');
