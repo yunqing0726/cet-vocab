@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#f6f2e9">
 <title>词频通 · 四六级词汇手册</title>
-<link rel="stylesheet" href="style.css?v=20261125n">
+<link rel="stylesheet" href="style.css?v=20261125t">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 </head>
@@ -239,11 +239,16 @@
         <button class="btn btn-ghost small-btn" onclick="App.exportData()">导出</button>
       </div>
       <div class="setting-row">
-        <div><div class="setting-name">导入学习记录</div><div class="setting-desc">从备份文件恢复，会与现有进度合并</div></div>
+        <div><div class="setting-name">导入学习记录</div><div class="setting-desc">自动备份、剪贴板或文件，三种方式</div></div>
         <div class="import-actions">
-          <label class="btn btn-ghost small-btn file-label">选文件<input type="file" id="importFile" accept=".json,application/json,text/plain" onchange="App.importData(event)"></label>
+          <button class="btn btn-ghost small-btn" onclick="App.importFromClipboard()">剪贴板</button>
           <button class="btn btn-ghost small-btn" onclick="App.openImport()">粘贴</button>
+          <label class="btn btn-ghost small-btn file-label">文件<input type="file" id="importFile" accept=".json,application/json,text/plain" onchange="App.importData(event)"></label>
         </div>
+      </div>
+      <div class="backup-panel">
+        <div class="backup-title">本地自动备份 <span class="backup-note">做完一套测验自动存一份，手机上不用手动导出</span></div>
+        <div id="backupInfo" class="backup-info"></div>
       </div>
       <div class="import-box" id="importBox" style="display:none">
         <div class="import-tip">把备份文件内容整段粘进来，或者直接粘<b>一行一个的单词清单</b>（这些词会被标记为已掌握）。手机上从微信/文件 App 里复制文本最方便。</div>
@@ -274,7 +279,7 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="data.js?v=20261125n"></script>
-<script src="app.js?v=20261125n"></script>
+<script src="data.js?v=20261125t"></script>
+<script src="app.js?v=20261125t"></script>
 </body>
 </html>

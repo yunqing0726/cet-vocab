@@ -768,6 +768,7 @@ function finishQuiz(){
   S.batchCursor=(S.batchCursor||0)+20;
   S.lastResult={rate:rate, correct:ss.correct, total:ss.mainWords.length, type:type, no:S.batchNo||1};
   S.session=null; save();
+  autoSnapshot();                        // 每做完一套自动存一份本地快照
   toast('第 '+(S.lastResult.no)+' 套完成！正确率 '+rate+'%（'+ss.correct+'/'+ss.mainWords.length+'）');
   showBatchSummary(S.lastResult);
 }
@@ -969,15 +970,104 @@ function renderDash(){
 /* ---------- 设置 ---------- */
 function renderSettings(){
   document.querySelectorAll('.seg button').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-lv')===String(S.level)); });
+  renderBackupInfo();
 }
 function resetPlacement(){
   if(!confirm('重新进行入学测试？')) return;
   S.placementDone=false; S.skipThreshold=0; S.session=null; save(); startPlacement();
 }
 function exportData(){
-  var blob=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
+  var txt=JSON.stringify(S,null,2);
+  var blob=new Blob([txt],{type:'application/json'});
   var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='cet-vocab-backup-'+today()+'.json'; a.click(); toast('已导出备份文件');
+  a.download='cet-vocab-backup-'+today()+'.json'; a.click();
+  // 手机上「下载」经常要选目录，顺手复制到剪贴板，粘一下就能换设备
+  autoSnapshot(true);
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){
+      toast('已导出，并复制到剪贴板（可直接粘到别的设备）');
+    }).catch(function(){ toast('已导出备份文件'); });
+  }else toast('已导出备份文件');
+}
+
+/* ---------- 本地自动快照（手机端不用手动导出） ----------
+   浏览器的安全限制导致网页无法扫描手机「下载」目录，
+   所以改成：app 自己把学习记录存成带时间戳的快照，设置页里直接恢复。 */
+var LS_BAK=LS+'_bak';
+var BAK_MAX=8;
+function snapshotPayload(){
+  return {
+    level:S.level, placementDone:S.placementDone, skipThreshold:S.skipThreshold, vocabSize:S.vocabSize,
+    mastered:S.mastered, tooEasy:S.tooEasy, tooEasyLog:S.tooEasyLog,
+    wrong:S.wrong, wrongLog:S.wrongLog, daily:S.daily, streak:S.streak,
+    accent:S.accent, lastActive:S.lastActive,
+    theta:S.theta, thetaN:S.thetaN, adaptiveLog:S.adaptiveLog,
+    adaptiveSeen:S.adaptiveSeen, learned:S.learned,
+    batchCursor:S.batchCursor, batchNo:S.batchNo, lastResult:S.lastResult
+  };
+}
+function readBackups(){ try{ return JSON.parse(localStorage.getItem(LS_BAK)||'[]')||[]; }catch(e){ return []; } }
+function writeBackups(list){ try{ localStorage.setItem(LS_BAK, JSON.stringify(list)); }catch(e){} }
+function autoSnapshot(force){
+  try{
+    var p=snapshotPayload();
+    var cnt=(Object.keys(p.learned||{}).length)+(Object.keys(p.wrong||{}).length)+(Object.keys(p.mastered||{}).length);
+    if(!cnt && !force) return;                     // 还没学东西就不占用空间
+    var json=JSON.stringify(p);
+    var list=readBackups();
+    if(list.length && list[0].json===json) return;  // 内容没变不重复存
+    list.unshift({ts:ts(), json:json, n:cnt, size:json.length});
+    if(list.length>BAK_MAX) list.length=BAK_MAX;
+    writeBackups(list);
+    renderBackupInfo();
+  }catch(e){}
+}
+function fmtAgo(t){
+  var m=Math.round((ts()-t)/60000);
+  if(m<1) return '刚刚';
+  if(m<60) return m+' 分钟前';
+  var h=Math.round(m/60);
+  if(h<24) return h+' 小时前';
+  return Math.round(h/24)+' 天前';
+}
+function renderBackupInfo(){
+  var el=document.getElementById('backupInfo');
+  if(!el) return;
+  var list=readBackups();
+  if(!list.length){
+    el.innerHTML='<div class="bak-none">还没有自动备份。做一套测验后会自动存一份。</div>';
+    return;
+  }
+  el.innerHTML='<div class="bak-head">检测到 <b>'+list.length+'</b> 份本地备份（最近 '+fmtAgo(list[0].ts)+'）</div>'+
+    list.map(function(b,i){
+      return '<div class="bak-item"><div class="bak-meta"><b>'+new Date(b.ts).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})+'</b>'+
+        '<span>'+b.n+' 个词的记录 · '+Math.round(b.size/1024)+'KB</span></div>'+
+        '<button class="btn btn-ghost small-btn" onclick="App.restoreSnapshot('+i+')">恢复</button></div>';
+    }).join('');
+}
+function restoreSnapshot(i){
+  var list=readBackups();
+  var b=list[i]; if(!b){ toast('备份不存在'); return; }
+  if(!confirm('用这份备份恢复？会与当前进度合并，不会删除现有记录。')) return;
+  try{
+    var inc=normalizeBackup(JSON.parse(b.json));
+    var cnt=mergeBackup(inc);
+    save(); renderHome(); renderBackupInfo();
+    toast('已恢复：掌握 '+cnt.mastered+' · 错题 '+cnt.wrong+' · 太简单 '+cnt.tooEasy);
+    go('home');
+  }catch(e){ toast('备份损坏，无法恢复'); }
+}
+/* 从剪贴板一键导入（手机最省事的路径） */
+function importFromClipboard(){
+  if(!navigator.clipboard || !navigator.clipboard.readText){
+    toast('这个浏览器不支持读剪贴板，请用「粘贴」'); openImport(); return;
+  }
+  navigator.clipboard.readText().then(function(txt){
+    if(!txt || !txt.trim()){ toast('剪贴板是空的，先把备份内容复制过来'); return; }
+    importFromText(txt, 'merge');
+  }).catch(function(){
+    toast('读取剪贴板被拒绝，请用「粘贴」手动粘'); openImport();
+  });
 }
 
 /* ---------- 导入（兼容旧版备份 + 手机粘贴） ----------
@@ -1033,10 +1123,15 @@ function normalizeBackup(o){
   }
   if(Array.isArray(o.wrongLog)) out.wrongLog=o.wrongLog.slice();
   if(o.daily && typeof o.daily==='object') out.daily=o.daily;
-  // 自适应能力值：旧备份没有，重算一个保守初值
+  // 自适应能力值
   if(typeof o.theta==='number') out.theta=o.theta;
   if(typeof o.thetaN==='number') out.thetaN=o.thetaN;
   if(Array.isArray(o.adaptiveLog)) out.adaptiveLog=o.adaptiveLog.slice();
+  // 学习账本 / 做过的词（新版才有，旧备份没有就跳过）
+  if(o.learned && typeof o.learned==='object') out.learned=o.learned;
+  if(o.adaptiveSeen && typeof o.adaptiveSeen==='object') out.adaptiveSeen=o.adaptiveSeen;
+  if(typeof o.batchCursor==='number') out.batchCursor=o.batchCursor;
+  if(typeof o.batchNo==='number') out.batchNo=o.batchNo;
   // 测试进度（旧版用 placeQueue）
   if(Array.isArray(o.placePool)) out.placePool=o.placePool;
   else if(Array.isArray(o.placeQueue)) out.placePool=o.placeQueue;
@@ -1066,6 +1161,26 @@ function mergeBackup(inc){
   if(inc.tooEasy) Object.keys(inc.tooEasy).forEach(function(k){
     if(!S.tooEasy[k]){ S.tooEasy[k]=inc.tooEasy[k]; added.tooEasy++; }
   });
+  // 学习账本 + 做过的词：这是「哪些词已经考过」的依据，必须一起并进来
+  if(inc.learned && typeof inc.learned==='object'){
+    S.learned=S.learned||{};
+    Object.keys(inc.learned).forEach(function(k){
+      var a=inc.learned[k], b=S.learned[k];
+      if(!b) S.learned[k]=a;
+      else{
+        b.n=Math.max(b.n||0,a.n||0);
+        b.ok=Math.max(b.ok||0,a.ok||0);
+        b.first=Math.min(b.first||Infinity, a.first||Infinity);
+        b.last=Math.max(b.last||0,a.last||0);
+      }
+    });
+  }
+  if(inc.adaptiveSeen && typeof inc.adaptiveSeen==='object'){
+    S.adaptiveSeen=S.adaptiveSeen||{};
+    Object.keys(inc.adaptiveSeen).forEach(function(k){
+      if(!S.adaptiveSeen[k] || inc.adaptiveSeen[k]>S.adaptiveSeen[k]) S.adaptiveSeen[k]=inc.adaptiveSeen[k];
+    });
+  }
   if(inc.daily) Object.keys(inc.daily).forEach(function(k){
     var a=inc.daily[k], b=S.daily[k];
     if(!b){ S.daily[k]=a; added.daily++; }
@@ -1100,7 +1215,10 @@ function mergeBackup(inc){
     if(inc.skipThreshold!==undefined) S.skipThreshold=inc.skipThreshold;
     if(inc.vocabSize) S.vocabSize=inc.vocabSize;
   }
-  if(typeof inc.theta==='number' && (!S.thetaN || S.thetaN===0)){ S.theta=inc.theta; S.thetaN=inc.thetaN||0; }
+  // 自适应能力值：备份里有时直接用（比反推准）
+  if(typeof inc.theta==='number'){
+    if(!S.thetaN || S.thetaN===0 || Math.abs((inc.theta||0))>Math.abs(S.theta||0)){ S.theta=inc.theta; S.thetaN=inc.thetaN||S.thetaN||0; }
+  }
   return added;
 }
 /* 覆盖式导入：完全用备份替换（保留当前词库范围） */
@@ -1141,6 +1259,11 @@ function importFromText(text, mode){
   var cnt={mastered:0,wrong:0,tooEasy:0,daily:0};
   if(mode==='replace') cnt=replaceBackup(inc);
   else cnt=mergeBackup(inc);
+  // 旧格式里的 wrongLog / daily 里出现过的词，也算「做过」
+  S.learned=S.learned||{};
+  (S.wrongLog||[]).forEach(function(it){
+    if(it && it.w && !S.learned[it.w]) S.learned[it.w]={n:1, ok:0, first:it.ts||Date.now(), last:it.ts||Date.now()};
+  });
   save(); renderHome();
   toast('导入完成：掌握 '+cnt.mastered+' · 错题 '+cnt.wrong+' · 太简单 '+cnt.tooEasy+' · 打卡 '+cnt.daily+' 天');
   go('home');
@@ -1198,7 +1321,8 @@ window.App={
   reviewWrong:reviewWrong, toggleNote:toggleNote, finishOverview:finishOverview, finishQuiz:finishQuiz,
   nextBatch:nextBatch, speakWord:speakWord,
   resetPlacement:resetPlacement, exportData:exportData, importData:importData, clearAll:clearAll,
-  openImport:openImport, doPasteImport:doPasteImport
+  openImport:openImport, doPasteImport:doPasteImport, restoreSnapshot:restoreSnapshot,
+  importFromClipboard:importFromClipboard, autoSnapshot:autoSnapshot, renderBackupInfo:renderBackupInfo
 };
 if(location.search.indexOf('test=1')>=0){
   window.App._setCurrent=function(w){ S.current=w; };
