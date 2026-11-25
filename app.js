@@ -26,7 +26,10 @@ var S = {
   placeAsked: {},        // word -> true（已问过）
   placeIdx: 0,
   placeCorrect: 0,
-  placeAnswers: []
+  placeAnswers: [],
+  theta: 0,              // 能力值（log10 词频刻度）：越大=认识越生僻的词
+  thetaN: 0,             // 已用于更新的答题次数（决定每次更新的步长）
+  adaptiveLog: []         // [{ts, theta, known, w}] 能力变化轨迹（调试/展示用）
 };
 
 function load(){
@@ -156,6 +159,17 @@ function autoSpeak(w){
     if(S.current && S.current.w===w.w) speak(true);
   }, 180);
 }
+/* 播放某个指定单词（首页预测卡片点词时用） */
+function speakWord(word){
+  var w=trainedPool().filter(function(x){ return x.w===word; })[0] || S.current;
+  if(!w) return;
+  try{
+    if(currentAudio){ currentAudio.pause(); currentAudio.currentTime=0; }
+    var a=getAudio(w.w); currentAudio=a;
+    var p=a.play();
+    if(p && p.catch) p.catch(function(){});
+  }catch(e){}
+}
 function toggleAccent(){
   S.accent=S.accent==1?2:1; save();
   preloadAudio(S.current); updateAccentUI();
@@ -200,6 +214,20 @@ function renderHome(){
     '<div class="hstat"><b>'+S.streak+'</b><span>连续打卡</span></div>';
   var teStat=document.getElementById('tooEasyStat');
   if(teStat) teStat.textContent=teN?teN+' 个已标记':'太简单';
+  // 自适应预测卡片：显示模型认为的「重点但可能不会」的词
+  var predBox=document.getElementById('predictBox');
+  if(predBox){
+    var hard=predictedHard(8);
+    if(S.thetaN>=5 && hard.length){
+      predBox.style.display='block';
+      predBox.innerHTML='<div class="predict-title">下一个可能卡住的词 <span class="predict-sub">已答 '+(S.thetaN||0)+' 题·模型预测</span></div>'+
+        hard.map(function(x){
+          return '<div class="predict-item" onclick="App.speakWord(\''+esc(x.w.w).replace(/'/g,"\\'")+'\')">'+
+            '<b>'+esc(x.w.w)+'</b><span class="predict-p">'+(x.w.ipa||'')+'</span>'+
+            '<span class="predict-badge">'+(x.p<0.3?'很可能不会':(x.p<0.5?'可能不会':'拿不准'))+'</span></div>';
+        }).join('');
+    }else predBox.style.display='none';
+  }
   document.querySelectorAll('.level-chip').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-lv')===String(S.level)); });
 }
 function setLevel(lv){
@@ -285,6 +313,10 @@ function finishPlacement(){
   }else proposed=0;
   S.skipThreshold=proposed;
   S.vocabSize=vocabSize;
+  // 用入学测试的拟合结果初始化自适应能力值 θ（同一 log10 词频刻度）
+  if(!allKnown && !allUnknown){ S.theta=Math.max(-0.3,Math.min(5.0,u0)); S.thetaN=ans.length; }
+  else if(allKnown){ S.theta=5.0; S.thetaN=ans.length; }
+  else { S.theta=-0.3; S.thetaN=ans.length; }
   var rate=Math.round(S.placeCorrect/Math.max(1,S.placePool.length)*100);
   S.session=null; save();
   showPlaceResult(vocabSize, rate, ans.length);
@@ -347,7 +379,137 @@ function wrongSorted(){
     return (db-ib)-(da-ia) || (y.n-x.n);
   });
 }
-/* 从词频顺序里连续取 20 词，答完一套自动接下一套，不重复同一批 */
+/* ---------- 自适应选题引擎（能力值 θ + 词难度 b 的 IRT/ELO 混合） ----------
+   参考 Duolingo Birdbrain（ELO）与标准 IRT（最大信息量选题/@Python adaptivetesting）：
+   - 每个词的难度 b = log10(词频 f)，词越生僻 b 越大（与 app 的词频刻度一致）
+   - 你的能力 θ 也用同一刻度：θ 越大，代表能认出越生僻的词
+   - 认识概率（3 参数逻辑斯蒂的简化 2PL）：P = 1/(1+exp((b-θ)/s))，s≈0.55
+   每答一题用 ELO 式增量更新 θ（答对则上升、答错则下降），步长随答题数衰减。
+   选题：给候选词打分，同时考虑「重点程度」「预测不会」「恰好卡在边界」。
+   ---------- */
+var ADAPT_S=0.55;          // 逻辑斯蒂斜率（越小曲线越平缓、越宽容）
+var ADAPT_K0=0.55;         // θ 更新初始步长（对数刻度）
+var ADAPT_BOUNDARY=0.55;   // 学习边界的目标认识概率
+
+function wordB(w){
+  var f=(w&&w.f)||99999;
+  if(f>=90000) f=20000;                     // 无词频排名的词当作中偏难
+  return Math.log(Math.max(2,f))/Math.LN10; // log10 刻度
+}
+function predictP(w,theta){
+  var t=(theta==null)?(S.theta||0):theta;
+  var z=(wordB(w)-t)/ADAPT_S;
+  z=Math.max(-8,Math.min(8,z));
+  return 1/(1+Math.exp(z));
+}
+function updateTheta(known,w){
+  var b=wordB(w), p=predictP(w);
+  var k=ADAPT_K0/Math.sqrt(1+(S.thetaN||0)*0.35);   // 步长随答题数衰减
+  var err=(known?1:0)-p;
+  S.theta=Math.max(-0.5,Math.min(5.2,(S.theta||0)+k*err));
+  S.thetaN=(S.thetaN||0)+1;
+  S.adaptiveLog=S.adaptiveLog||[];
+  S.adaptiveLog.push({ts:ts(), theta:Math.round(S.theta*1000)/1000, known:!!known, w:w.w});
+  if(S.adaptiveLog.length>500) S.adaptiveLog.shift();
+}
+/* 重点程度：在当前可背词池里，词频越靠前越重点（0~1）。
+   注意必须用「当前词池」的实际词频范围归一化，否则跳过简单词后
+   所有剩余词的绝对重要性都偏低，会被过滤掉。 */
+var _impRange=null, _impKey='';
+function impRange(){
+  var key=String(S.level)+'|'+String(S.skipThreshold);
+  if(_impRange && _impKey===key) return _impRange;
+  var pool=trainedPool();
+  var logs=pool.map(function(w){ return wordB(w); }).sort(function(a,b){ return a-b; });
+  _impKey=key;
+  if(!logs.length) return (_impRange={lo:0.3,hi:4.3});
+  _impRange={lo:logs[0], hi:logs[logs.length-1]};
+  if(_impRange.hi-_impRange.lo<0.3) _impRange.hi=_impRange.lo+0.3;
+  return _impRange;
+}
+function importanceOf(w){
+  var rg=impRange();
+  var b=wordB(w);
+  return Math.max(0,Math.min(1,1-(b-rg.lo)/(rg.hi-rg.lo)));
+}
+/* 自适应选题：从词池里挑下一批。
+   做法：先筛出「预测你还不认识」的重点词（p<0.62 且不是最偏的），
+   再按词频把候选分层，每层按 score 取若干个 —— 这样既盯着你不会的，
+   又不会每次都只拿同一段相邻词，整批覆盖不同频段。 */
+function pickAdaptive(type, size){
+  size=size||20;
+  var pool=trainedPool();
+  if(!pool.length) return [];
+  var theta=S.theta||0;
+  var seen=S.adaptiveSeen||{};
+  var scored=pool.map(function(w){
+    var p=predictP(w,theta);
+    var imp=importanceOf(w);
+    // 重点 × 预测不会；同时给「刚好卡在 30% 认识率」的词一点加成（最有学习价值）
+    var s=imp*(1-p);
+    s+=0.35*Math.exp(-Math.pow((p-0.30)/0.25,2));
+    if(seen[w.w]) s*=0.45;                        // 最近做过的强降权
+    return {w:w, s:s, p:p, imp:imp, f:(w.f||99999)};
+  });
+  // 到期错题优先（FSRS）
+  var dueSet={};
+  wrongDue().slice(0,6).forEach(function(w){ dueSet[w.w]=1; });
+  var dueList=scored.filter(function(x){ return dueSet[x.w.w]; })
+                    .sort(function(a,b){ return b.s-a.s; }).slice(0,6);
+  var duePicked=dueList.map(function(x){ return x.w; });
+  var dueUsed={}; duePicked.forEach(function(w){ dueUsed[w.w]=1; });
+
+  // 候选：预测「你还不太认识」的词（p<0.62），排除已选中的错题
+  var cand=scored.filter(function(x){
+    return !dueUsed[x.w.w] && x.p<0.62 && x.imp>0.05;
+  });
+  if(cand.length<size) cand=scored.filter(function(x){ return !dueUsed[x.w.w]; });
+  cand.sort(function(a,b){ return a.f-b.f; });     // 按词频升序分层
+
+  var need=Math.max(0,size-duePicked.length);
+  var strata=Math.min(4, Math.max(1, Math.floor(cand.length/need) || 1));
+  var picked=duePicked.slice();
+  var perStratum=Math.ceil(need/strata);
+  for(var st=0; st<strata && picked.length<size; st++){
+    var lo=Math.floor(st*cand.length/strata), hi=Math.floor((st+1)*cand.length/strata);
+    var seg=cand.slice(lo,hi).sort(function(a,b){ return b.s-a.s; });
+    for(var i=0;i<seg.length && i<perStratum && picked.length<size;i++) picked.push(seg[i].w);
+  }
+  // 兜底：还不够就从全局最高分补
+  if(picked.length<size){
+    scored.slice().sort(function(a,b){ return b.s-a.s; }).forEach(function(x){
+      if(picked.length<size && picked.indexOf(x.w)<0) picked.push(x.w);
+    });
+  }
+  // 记录已见（7 天内降权）
+  S.adaptiveSeen=S.adaptiveSeen||{};
+  picked.forEach(function(w){ S.adaptiveSeen[w.w]=ts(); });
+  var cut=ts()-7*86400000;
+  Object.keys(S.adaptiveSeen).forEach(function(k){ if(S.adaptiveSeen[k]<cut) delete S.adaptiveSeen[k]; });
+  return shuffle(picked.slice(0,size)).sort(function(a,b){ return (a.f||99999)-(b.f||99999); });
+}
+/* 供 UI 用：当前模型认为「最值得优先攻克」的重点词前 N 个。
+   风险 = 重点程度 × 预测不认识程度；不硬性要求预测不认识，
+   否则水平高的用户永远看不到卡片。 */
+function predictedHard(n){
+  n=n||8;
+  var theta=S.theta||0;
+  var seen=S.adaptiveSeen||{};
+  return trainedPool().map(function(w){
+    var p=predictP(w,theta), imp=importanceOf(w);
+    var risk=imp*(1-p);
+    return {w:w, p:p, imp:imp, risk:risk, b:wordB(w), seen:!!seen[w.w]};
+  }).filter(function(x){
+    // 只考虑重点词（词频前 70%）且还没掌握（不在 mastered / 不是太简单）
+    return x.imp>0.3 && !S.mastered[x.w.w];
+  }).sort(function(a,b){
+    // 先挑没做过的，再按风险排序
+    if(a.seen!==b.seen) return a.seen?1:-1;
+    return b.risk-a.risk;
+  }).slice(0,n);
+}
+/**/
+/* 从词频顺序里连续取 20 词（老逻辑，错题本等场景保留） */
 function pickBatch(type, size){
   size=size||20;
   var pool=freqSorted();                 // 已按词频升序，且已排除太简单/跳过的词
@@ -381,7 +543,8 @@ function startQuiz(type, opts){
     queue=wrongSorted().slice(0,20);
     if(!queue.length){ toast('错题本还是空的，先做几道题吧'); go('wrongbook'); return; }
   }else{
-    queue=pickBatch(type, 20);
+    // 认识测验走自适应选题；拼写测验沿用顺序取词
+    queue=(type==='normal') ? pickAdaptive(type, 20) : pickBatch(type, 20);
   }
   if(!queue.length){ toast('没有可测验的单词'); return; }
   S.session={ type:type, mode:'main', queue:queue, idx:0, correct:0,
@@ -468,6 +631,7 @@ function snapshot(w){
     recMain:rec.main, recRetest:rec.retest,
     idx:ss.idx, correct:ss.correct, mode:ss.mode,
     logLen:S.wrongLog.length,
+    prevTheta:S.theta, prevThetaN:S.thetaN, prevAdaptiveLogLen:(S.adaptiveLog||[]).length,
     isRetest:ss.mode!=='main'
   };
 }
@@ -484,6 +648,9 @@ function undo(){
   ss.rec[w]={main:L.recMain, retest:L.recRetest};
   ss.idx=L.idx; ss.correct=L.correct; ss.mode=L.mode;
   S.wrongLog.length=L.logLen;
+  // 撤销时把能力值也回滚，否则撤销会双重计数
+  if(L.prevTheta!==undefined){ S.theta=L.prevTheta; S.thetaN=L.prevThetaN; }
+  if(L.prevAdaptiveLogLen!==undefined) (S.adaptiveLog||[]).length=L.prevAdaptiveLogLen;
   save(); showQuiz(); toast('已撤销「'+w+'」，可以重新作答');
 }
 function answer(known){ reveal(known); }
@@ -519,7 +686,10 @@ function reveal(known){
   var d=today(), day=S.daily[d]||{new:0,correct:0,total:0};
   day.total++; if(known) day.correct++;
   if(!S.mastered[w.w]||S.mastered[w.w].n===1) day.new++;
-  S.daily[d]=day; updateStreak(); save();
+  S.daily[d]=day; updateStreak();
+  // 自适应：每答一题都更新能力值（只有主轮计入，重测轮是对同批词的强化，不重复算能力）
+  if(ss.mode==='main' && (ss.type==='normal'||ss.type==='wrong')) updateTheta(known, w);
+  save();
 
   var mean=(w.m||[]).map(function(x){ return (x.p?'<span class="pos">'+esc(x.p)+'.</span>':'')+esc(x.t); }).join('；');
   document.getElementById('answerMean').innerHTML='<span class="pos" style="font-family:Times New Roman,serif">'+esc(w.w)+' '+esc(w.ipa||'')+'</span><br>'+(mean||'—');
@@ -804,7 +974,7 @@ window.App={
   nextWord:nextWord, undo:undo, markTooEasy:markTooEasy, undoTooEasy:undoTooEasy,
   setWrongRange:setWrongRange, setWrongBrowse:setWrongBrowse, browseMonthShift:browseMonthShift,
   reviewWrong:reviewWrong, toggleNote:toggleNote, finishOverview:finishOverview, finishQuiz:finishQuiz,
-  nextBatch:nextBatch,
+  nextBatch:nextBatch, speakWord:speakWord,
   resetPlacement:resetPlacement, exportData:exportData, importData:importData, clearAll:clearAll
 };
 if(location.search.indexOf('test=1')>=0){

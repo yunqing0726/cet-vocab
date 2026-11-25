@@ -255,4 +255,15 @@ svg{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.7;st
 .pr-sub{font-size:13px;color:var(--ink-soft);margin:20px 0 28px}
 .place-result .btn{margin:6px auto}
 
+/* 自适应预测卡片 */
+.predict-box{margin:18px 0 6px;padding:14px 16px;background:#fff;border:1px solid rgba(35,42,53,.10);border-radius:10px}
+.predict-title{font-size:12px;color:var(--ink-soft);letter-spacing:.5px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:baseline}
+.predict-sub{font-size:11px;opacity:.7}
+.predict-item{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-top:1px solid rgba(35,42,53,.06);cursor:pointer}
+.predict-item:first-of-type{border-top:none}
+.predict-item b{font-family:var(--serif);font-size:17px;font-weight:600;color:var(--ink)}
+.predict-p{font-family:var(--serif);font-size:12px;color:var(--ink-soft);flex:1}
+.predict-badge{font-size:11px;padding:2px 7px;border-radius:20px;background:rgba(198,71,59,.10);color:var(--red);white-space:nowrap}
+
+
 
