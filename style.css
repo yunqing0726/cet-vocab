@@ -318,3 +318,7 @@ svg{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.7;st
 .unit-main b{font:600 15px/1.35 -apple-system,"PingFang SC",sans-serif;color:var(--ink,#232a35);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .unit-meta{font-size:12.5px;color:var(--ink-soft)}
 .unit-pct{flex:0 0 auto;font:600 15px/1 "Times New Roman",serif;color:var(--red)}
+
+/* 「复习昨天错的词」按钮：主按钮上方的次级按钮 */
+#reviewYBtn{display:none;margin-bottom:10px;font-size:14px;letter-spacing:.3px}
+#reviewYBtn .yb-label{vertical-align:middle}

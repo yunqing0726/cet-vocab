@@ -240,6 +240,15 @@ function fsrsInterval(S,targetR){
   var r=Math.min(0.99,Math.max(0.01,targetR||FSRS_TARGET_R));
   return S/FSRS_FACTOR*(Math.pow(r,-2)-1);       // 天
 }
+/* 实际复习间隔：答对 2 次及以后，间隔压到 0.6 倍
+   （FSRS 默认参数会让间隔涨得偏激进：375 天太长，压一档更符合实际复习节奏） */
+var FSRS_SCALE_AFTER=2;      // 第几次答对之后开始缩短
+var FSRS_SCALE=0.6;          // 缩短到原来的 0.6 倍
+function wrongInterval(x){
+  var iv=fsrsInterval(x&&x.S,FSRS_TARGET_R);
+  if(x && (x.rep||0)>=FSRS_SCALE_AFTER) iv*=FSRS_SCALE;
+  return Math.max(0.25,iv);
+}
 function fsrsUpdate(x,known,days){
   var S=Math.max(0.3,x.S||0.5);
   var D=Math.max(1,Math.min(10,x.D||5));
@@ -523,7 +532,7 @@ function wrongDue(){
   return trainedPool().filter(function(w){
     var x=S.wrong[w.w]; if(!x) return false;
     var d=(now-(x.last||x.first))/86400000;
-    var interval=fsrsInterval(x.S,FSRS_TARGET_R);
+    var interval=wrongInterval(x);
     return d>=interval;
   });
 }
@@ -532,7 +541,7 @@ function wrongSorted(){
   return trainedPool().filter(function(w){ return !!S.wrong[w.w]; }).sort(function(a,b){
     var x=S.wrong[a.w],y=S.wrong[b.w];
     var da=(now-(x.last||x.first))/86400000, db=(now-(y.last||y.first))/86400000;
-    var ia=fsrsInterval(x.S,FSRS_TARGET_R), ib=fsrsInterval(y.S,FSRS_TARGET_R);
+    var ia=wrongInterval(x), ib=wrongInterval(y);
     return (db-ib)-(da-ia) || (y.n-x.n);
   });
 }
@@ -542,7 +551,7 @@ function collegeWrongSorted(){
   return COLLEGE.filter(function(w){ return !!S.wrong[w.w]; }).sort(function(a,b){
     var x=S.wrong[a.w],y=S.wrong[b.w];
     var da=(now-(x.last||x.first))/86400000, db=(now-(y.last||y.first))/86400000;
-    var ia=fsrsInterval(x.S,FSRS_TARGET_R), ib=fsrsInterval(y.S,FSRS_TARGET_R);
+    var ia=wrongInterval(x), ib=wrongInterval(y);
     return (db-ib)-(da-ia) || (y.n-x.n);
   });
 }
@@ -1009,6 +1018,31 @@ function wrongFiltered(){
 }
 function setWrongRange(r){ wrongRange=String(r); renderWrong(); }
 function setWrongBrowse(v){ wrongBrowse=!!v; renderWrong(); }
+/* 「昨天错的词」：按 wrongLog 里 date === 昨天 的记录取词（两本错题本各自过滤） */
+function yesterdayKey(){
+  var d=new Date(); d.setDate(d.getDate()-1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function yesterdayWrongWords(){
+  var y=yesterdayKey(), seen={}, out=[];
+  (S.wrongLog||[]).forEach(function(it){
+    if(it.date!==y) return;
+    var w=COLLEGE_MAP[String(it.w).toLowerCase()] ||
+          trainedPool().filter(function(x){ return x.w===it.w; })[0] ||
+          ALL.filter(function(x){ return x.w===it.w; })[0];
+    if(!w) return;
+    var isCol = !!COLLEGE_MAP[String(it.w).toLowerCase()];
+    if(wrongBook==='college' ? !isCol : isCol) return;
+    if(seen[w.w]) return;
+    seen[w.w]=1; out.push(w);
+  });
+  return out;
+}
+function reviewYesterday(){
+  var list=yesterdayWrongWords();
+  if(!list.length){ toast('昨天没有答错的单词'); return; }
+  startQuiz('wrong',{queue:shuffle(list.slice())});
+}
 function browseMonthShift(n){
   var d=new Date(browseYear,browseMonth+n,1); browseYear=d.getFullYear(); browseMonth=d.getMonth(); renderWrong();
 }
@@ -1020,6 +1054,14 @@ function renderWrong(){
   if(browseBtn2){ browseBtn2.classList.toggle('on',wrongBrowse); }
   var list=wrongFiltered();
   document.getElementById('reviewBtn').style.display=list.length?'block':'none';
+  // 「复习昨天的错词」按钮：只有昨天真有错词时才出现
+  var yBtn=document.getElementById('reviewYBtn');
+  if(yBtn){
+    var yN=yesterdayWrongWords().length;
+    yBtn.style.display=yN?'block':'none';
+    var yLabel=yBtn.querySelector('.yb-label');
+    if(yLabel) yLabel.textContent='复习昨天错的 '+yN+' 个词';
+  }
   var box=document.getElementById('wrongList');
   if(!list.length){
     box.innerHTML='<div class="empty"><p>这个时间范围内没有错题</p><p style="font-size:13px;margin-top:6px">'+
@@ -1032,12 +1074,12 @@ function renderWrong(){
   box.innerHTML=list.sort(function(a,b){
     var x=S.wrong[a.w],y=S.wrong[b.w];
     var da=(now-(x.last||x.first))/86400000, db=(now-(y.last||y.first))/86400000;
-    var ia=fsrsInterval(x.S,FSRS_TARGET_R), ib=fsrsInterval(y.S,FSRS_TARGET_R);
+    var ia=wrongInterval(x), ib=wrongInterval(y);
     return (db-ib)-(da-ia)||(y.n-x.n);
   }).map(function(w){
     var x=S.wrong[w.w];
     var days=(now-(x.last||x.first))/86400000;
-    var interval=fsrsInterval(x.S,FSRS_TARGET_R);
+    var interval=wrongInterval(x);
     var overdue=days>=interval;
     var tag=overdue?'<span class="wrong-priority '+(days>interval*2?'forgot':'recent')+'">'+(days>interval*2?'长期遗忘':'待复习')+'</span>':'';
     var mean=(w.m[0]&&w.m[0].t)||'';
@@ -1513,7 +1555,7 @@ window.App={
   startPlacement:startPlacement, speak:speak, toggleAccent:toggleAccent, placeAnswer:placeAnswer, answer:answer, checkSpell:checkSpell,
   nextWord:nextWord, undo:undo, markTooEasy:markTooEasy, undoTooEasy:undoTooEasy,
   setWrongRange:setWrongRange, setWrongBrowse:setWrongBrowse, browseMonthShift:browseMonthShift,
-  reviewWrong:reviewWrong, toggleNote:toggleNote, finishOverview:finishOverview, finishQuiz:finishQuiz,
+  reviewWrong:reviewWrong, reviewYesterday:reviewYesterday, toggleNote:toggleNote, finishOverview:finishOverview, finishQuiz:finishQuiz,
   nextBatch:nextBatch, speakWord:speakWord,
   resetPlacement:resetPlacement, exportData:exportData, importData:importData, clearAll:clearAll,
   openImport:openImport, doPasteImport:doPasteImport, restoreSnapshot:restoreSnapshot,
