@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#f6f2e9">
-<title>词频通 · 四六级词汇手册</title>
-<link rel="stylesheet" href="style.css?v=20261125a">
+<title>词频�?· 四六级词汇手�?/title>
+<link rel="stylesheet" href="style.css?v=20261125b">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 </head>
@@ -29,8 +29,8 @@
 
   <header class="topbar">
     <button class="brand" onclick="App.go('home')">
-      <span class="brand-seal">记</span>
-      <span class="brand-text">词频通<span class="brand-sub">CET 4 — 6</span></span>
+      <span class="brand-seal">�?/span>
+      <span class="brand-text">词频�?span class="brand-sub">CET 4 �?6</span></span>
     </button>
     <div class="top-actions">
       <button class="icon-btn" onclick="App.go('dashboard')" title="学习看板" aria-label="学习看板"><svg><use href="#i-chart"/></svg></button>
@@ -40,22 +40,22 @@
 
   <section id="view-loading" class="view active">
     <div class="loader"></div>
-    <p>正在翻开词典…</p>
-    <p class="loading-sub" id="loadingSub">首次加载约需几秒，请稍候</p>
+    <p>正在翻开词典�?/p>
+    <p class="loading-sub" id="loadingSub">首次加载约需几秒，请稍�?/p>
   </section>
 
   <!-- 首页 -->
   <section id="view-home" class="view">
     <div class="hero">
-      <div class="hero-kicker">大学英语四六级词汇手册</div>
+      <div class="hero-kicker">大学英语四六级词汇手�?/div>
       <div class="hero-title">按考频，记单词</div>
       <div class="hero-rule"></div>
-      <div class="hero-note">从最常用的词开始。认识就跳过，不认识就收进错题本，按遗忘曲线再见面。</div>
+      <div class="hero-note">从最常用的词开始。认识就跳过，不认识就收进错题本，按遗忘曲线再见面�?/div>
     </div>
 
     <div class="stat-strip" id="homeStats"></div>
 
-    <div class="section-label">今天做什么</div>
+    <div class="section-label">今天做什�?/div>
     <div class="menu-grid">
       <button class="menu-card primary" onclick="App.startQuiz('normal')">
         <span class="menu-ic"><svg><use href="#i-target"/></svg></span>
@@ -70,18 +70,18 @@
       </button>
       <button class="menu-card" onclick="App.go('wrongbook')">
         <span class="menu-ic"><svg><use href="#i-mark"/></svg></span>
-        <span class="menu-name">错题本</span>
+        <span class="menu-name">错题�?/span>
         <span class="menu-desc" id="wrongCount">间隔复习</span>
       </button>
       <button class="menu-card" onclick="App.go('tooeasy')">
         <span class="menu-ic"><svg><use href="#i-undo"/></svg></span>
-        <span class="menu-name">太简单</span>
-        <span class="menu-desc" id="tooEasyStat">已标记</span>
+        <span class="menu-name">太简�?/span>
+        <span class="menu-desc" id="tooEasyStat">已标�?/span>
       </button>
       <button class="menu-card" onclick="App.go('dashboard')">
         <span class="menu-ic"><svg><use href="#i-chart"/></svg></span>
         <span class="menu-name">学习看板</span>
-        <span class="menu-desc">记录与打卡</span>
+        <span class="menu-desc">记录与打�?/span>
       </button>
     </div>
 
@@ -100,19 +100,19 @@
       <span class="step-progress" id="placeProgress"></span>
     </div>
     <div class="quiz-card">
-      <div class="quiz-hint">这个词，你认识吗？</div>
-      <div class="word-display" id="placeWord">—</div>
+      <div class="quiz-hint">这个词，你认识吗�?/div>
+      <div class="word-display" id="placeWord">�?/div>
       <div class="ipa-line" id="placeIpa"></div>
       <div class="speak-row">
-        <button class="accent-btn" id="accentBtnPlace" onclick="App.toggleAccent()" title="切换美式/英式">美</button>
-        <button class="speak-btn" onclick="App.speak()"><svg><use href="#i-sound"/></svg>听发音</button>
+        <button class="accent-btn" id="accentBtnPlace" onclick="App.toggleAccent()" title="切换美式/英式">�?/button>
+        <button class="speak-btn" onclick="App.speak()"><svg><use href="#i-sound"/></svg>听发�?/button>
       </div>
     </div>
     <div class="answer-actions" id="placeActions">
-      <button class="btn btn-ghost" onclick="App.placeAnswer(false)">不认识</button>
+      <button class="btn btn-ghost" onclick="App.placeAnswer(false)">不认�?/button>
       <button class="btn btn-primary" onclick="App.placeAnswer(true)">认识</button>
     </div>
-    <p class="tip">根据你的回答，自动略过已掌握的简单词。</p>
+    <p class="tip">根据你的回答，自动略过已掌握的简单词�?/p>
   </section>
 
   <!-- 测验 -->
@@ -122,12 +122,12 @@
       <span class="step-progress" id="quizProgress"></span>
     </div>
     <div class="quiz-card" id="quizCard">
-      <div class="quiz-hint" id="quizHint">这个词，你认识吗？</div>
-      <div class="word-display" id="quizWord">—</div>
+      <div class="quiz-hint" id="quizHint">这个词，你认识吗�?/div>
+      <div class="word-display" id="quizWord">�?/div>
       <div class="ipa-line" id="quizIpa"></div>
       <div class="speak-row">
-        <button class="accent-btn" id="accentBtn" onclick="App.toggleAccent()" title="切换美式/英式">美</button>
-        <button class="speak-btn" onclick="App.speak()"><svg><use href="#i-sound"/></svg>听发音</button>
+        <button class="accent-btn" id="accentBtn" onclick="App.toggleAccent()" title="切换美式/英式">�?/button>
+        <button class="speak-btn" onclick="App.speak()"><svg><use href="#i-sound"/></svg>听发�?/button>
       </div>
 
       <div class="spell-box" id="spellBox" style="display:none">
@@ -145,25 +145,25 @@
     </div>
 
     <div class="answer-actions" id="quizActions">
-      <button class="btn btn-ghost" onclick="App.answer(false)">不认识</button>
+      <button class="btn btn-ghost" onclick="App.answer(false)">不认�?/button>
       <button class="btn btn-primary" onclick="App.answer(true)">认识</button>
     </div>
     <div class="answer-actions" id="revealActions" style="display:none">
       <button class="btn btn-ghost" id="undoBtn" onclick="App.undo()" style="display:none"><svg class="btn-ic"><use href="#i-undo"/></svg>撤销</button>
-      <button class="btn btn-skip" onclick="App.markTooEasy()">太简单</button>
-      <button class="btn btn-primary" onclick="App.nextWord()">下一个<svg class="btn-ic"><use href="#i-arrow"/></svg></button>
+      <button class="btn btn-skip" onclick="App.markTooEasy()">太简�?/button>
+      <button class="btn btn-primary" onclick="App.nextWord()">下一�?svg class="btn-ic"><use href="#i-arrow"/></svg></button>
     </div>
     <p class="tip" id="quizTip"></p>
     <div class="quiz-tools">
       <button class="link-btn" onclick="App.resumeQuiz()">继续当前测验</button>
-      <button class="link-btn" onclick="App.restartQuiz()">重新开始</button>
+      <button class="link-btn" onclick="App.restartQuiz()">重新开�?/button>
     </div>
   </section>
 
-  <!-- 太简单列表 -->
+  <!-- 太简单列�?-->
   <section id="view-tooeasy" class="view">
-    <div class="section-title">太简单</div>
-    <p class="section-sub">按标记时间排列，最新的在上面。撤销后单词回到单词表。</p>
+    <div class="section-title">太简�?/div>
+    <p class="section-sub">按标记时间排列，最新的在上面。撤销后单词回到单词表�?/p>
     <div id="tooEasyList" class="wrong-list"></div>
   </section>
 
@@ -179,24 +179,24 @@
     </div>
   </section>
 
-  <!-- 错题本 -->
+  <!-- 错题�?-->
   <section id="view-wrongbook" class="view">
-    <div class="section-title">错题本</div>
+    <div class="section-title">错题�?/div>
     <p class="section-sub">每个词最多记一次错 · 先测全部，再对答错词打乱重测</p>
     <div class="range-bar">
       <span class="range-label">时间</span>
       <button class="range-chip" data-range="1" onclick="App.setWrongRange('1')">一天内</button>
-      <button class="range-chip" data-range="3" onclick="App.setWrongRange('3')">三天内</button>
+      <button class="range-chip" data-range="3" onclick="App.setWrongRange('3')">三天�?/button>
       <button class="range-chip" data-range="7" onclick="App.setWrongRange('7')">一周内</button>
       <button class="range-chip on" data-range="all" onclick="App.setWrongRange('all')">全部</button>
     </div>
     <div class="browse-bar">
-      <button class="link-btn on" id="browseBtn" onclick="App.setWrongBrowse(0)">按遗忘曲线</button>
+      <button class="link-btn on" id="browseBtn" onclick="App.setWrongBrowse(0)">按遗忘曲�?/button>
       <button class="link-btn" id="browseBtn2" onclick="App.setWrongBrowse(1)">按日期浏览（哪天错了哪些词）</button>
     </div>
     <div id="wrongList" class="wrong-list"></div>
     <div class="fixed-bottom">
-      <button class="btn btn-primary wide" onclick="App.reviewWrong()" id="reviewBtn">开始强化复习</button>
+      <button class="btn btn-primary wide" onclick="App.reviewWrong()" id="reviewBtn">开始强化复�?/button>
     </div>
   </section>
 
@@ -204,7 +204,7 @@
   <section id="view-dashboard" class="view">
     <div class="section-title">学习看板</div>
     <div id="dashCards" class="dash-cards"></div>
-    <div class="section-title small">最近七天</div>
+    <div class="section-title small">最近七�?/div>
     <div id="dashChart" class="dash-chart"></div>
     <div class="section-title small">本月打卡</div>
     <div id="dashCalendar" class="calendar"></div>
@@ -215,7 +215,7 @@
     <div class="section-title">设置</div>
     <div class="settings-group">
       <div class="setting-row">
-        <div><div class="setting-name">词库范围</div><div class="setting-desc">切换后立即生效</div></div>
+        <div><div class="setting-name">词库范围</div><div class="setting-desc">切换后立即生�?/div></div>
         <div class="seg">
           <button data-lv="4" onclick="App.setLevel(4)">四级</button>
           <button data-lv="6" onclick="App.setLevel(6)">六级</button>
@@ -223,7 +223,7 @@
         </div>
       </div>
       <div class="setting-row">
-        <div><div class="setting-name">重新测试词量</div><div class="setting-desc">重做 100 题，调整跳过阈值</div></div>
+        <div><div class="setting-name">重新测试词量</div><div class="setting-desc">重做 100 题，调整跳过阈�?/div></div>
         <button class="btn btn-ghost small-btn" onclick="App.resetPlacement()">重测</button>
       </div>
       <div class="setting-row">
@@ -231,7 +231,7 @@
         <button class="btn btn-ghost small-btn" onclick="App.exportData()">导出</button>
       </div>
       <div class="setting-row">
-        <div><div class="setting-name">导入学习记录</div><div class="setting-desc">从备份文件恢复</div></div>
+        <div><div class="setting-name">导入学习记录</div><div class="setting-desc">从备份文件恢�?/div></div>
         <label class="btn btn-ghost small-btn file-label">导入<input type="file" id="importFile" accept=".json" onchange="App.importData(event)"></label>
       </div>
       <div class="setting-row danger">
@@ -239,20 +239,20 @@
         <button class="btn btn-danger" onclick="App.clearAll()">清空</button>
       </div>
     </div>
-    <p class="about">词频通 · 词表来自 KyleBing/english-vocabulary，音标与例句来自 dictionaryapi.dev 与 CMU 发音词典，词频参考 Google 20k 词表。以通用词频近似考频，仅供学习参考。</p>
+    <p class="about">词频�?· 词表来自 KyleBing/english-vocabulary，音标与例句来自 dictionaryapi.dev �?CMU 发音词典，词频参�?Google 20k 词表。以通用词频近似考频，仅供学习参考�?/p>
   </section>
 
   <nav class="bottom-nav">
     <button onclick="App.go('home')" data-nav="home"><svg><use href="#i-home"/></svg><span>首页</span></button>
     <button onclick="App.resumeQuiz()" data-nav="quiz"><svg><use href="#i-target"/></svg><span>测验</span></button>
-    <button onclick="App.go('wrongbook')" data-nav="wrongbook"><svg><use href="#i-mark"/></svg><span>错题本</span></button>
+    <button onclick="App.go('wrongbook')" data-nav="wrongbook"><svg><use href="#i-mark"/></svg><span>错题�?/span></button>
     <button onclick="App.go('dashboard')" data-nav="dashboard"><svg><use href="#i-chart"/></svg><span>看板</span></button>
   </nav>
 </div>
 
 <div id="toast" class="toast"></div>
 
-<script src="data.js?v=20261125a"></script>
-<script src="app.js?v=20261125a"></script>
+<script src="data.js?v=20261125b"></script>
+<script src="app.js?v=20261125b"></script>
 </body>
 </html>
