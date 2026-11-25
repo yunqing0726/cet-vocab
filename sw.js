@@ -1,5 +1,5 @@
-/* 词频�?Service Worker �?离线缓存
-   缓存版本升级：改 CACHE 名称即可触发旧缓存清�?*/
+/* 词频通 Service Worker — 离线缓存
+   缓存版本升级：改 CACHE 名称即可触发旧缓存清理 */
 var CACHE = 'cet-vocab-v2';
 var CORE = [
   './',
@@ -15,7 +15,7 @@ var CORE = [
 self.addEventListener('install', function(e){
   e.waitUntil(
     caches.open(CACHE).then(function(c){
-      return c.addAll(CORE).catch(function(){ /* 单个资源失败不阻断安�?*/ });
+      return c.addAll(CORE).catch(function(){ /* 单个资源失败不阻断安装 */ });
     }).then(function(){ return self.skipWaiting(); })
   );
 });
