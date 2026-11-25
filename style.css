@@ -239,3 +239,12 @@ svg{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.7;st
 
 @media(min-width:600px){#app{border-left:1px solid var(--rule);border-right:1px solid var(--rule)}}
 
+/* 一套完成结算页 */
+#batchSummary{padding:48px 24px;text-align:center}
+.bs-title{font-family:var(--serif);font-size:22px;font-weight:600;margin-bottom:24px;color:var(--ink)}
+.bs-rate{font-family:var(--serif);font-size:64px;font-weight:700;color:var(--jade);line-height:1}
+.bs-rate span{font-size:28px;margin-left:4px;color:var(--ink-soft)}
+.bs-detail{font-size:14px;color:var(--ink-soft);margin-top:12px;margin-bottom:36px}
+.bs-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.bs-actions .btn{padding:12px 24px;font-size:15px}
+

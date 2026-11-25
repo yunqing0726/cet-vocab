@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#f6f2e9">
 <title>词频通 · 四六级词汇手册</title>
-<link rel="stylesheet" href="style.css?v=20261125e">
+<link rel="stylesheet" href="style.css?v=20261125g">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 </head>
@@ -175,8 +175,13 @@
     </div>
     <div id="overviewList" class="ov-list"></div>
     <div class="fixed-bottom">
-      <button class="btn btn-primary wide" onclick="App.finishOverview()">完成</button>
+      <button class="btn btn-primary wide" onclick="App.finishOverview()">完成，去下一套</button>
     </div>
+  </section>
+
+  <!-- 一套完成结算 -->
+  <section id="view-batchdone" class="view">
+    <div id="batchSummary"></div>
   </section>
 
   <!-- 错题本 -->
@@ -252,7 +257,7 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="data.js?v=20261125e"></script>
-<script src="app.js?v=20261125e"></script>
+<script src="data.js?v=20261125g"></script>
+<script src="app.js?v=20261125g"></script>
 </body>
 </html>

@@ -248,6 +248,26 @@ function wrongSorted(){
     return (db-ib)-(da-ia) || (y.n-x.n);
   });
 }
+/* 从词频顺序里连续取 20 词，答完一套自动接下一套，不重复同一批 */
+function pickBatch(type, size){
+  size=size||20;
+  var pool=freqSorted();                 // 已按词频升序，且已排除太简单/跳过的词
+  if(!pool.length) return [];
+  var set={};
+  var cursor=S.batchCursor||0;
+  if(cursor>=pool.length) cursor=0;
+  var picked=[];
+  for(var i=0;i<pool.length && picked.length<size;i++){
+    var w=pool[(cursor+i)%pool.length];
+    if(set[w.w]) continue;
+    set[w.w]=1; picked.push(w);
+  }
+  // 到期错题最多并入 5 个（不足则补足到 size）
+  wrongDue().slice(0,5).forEach(function(w){
+    if(picked.length<size && !set[w.w]){ set[w.w]=1; picked.push(w); }
+  });
+  return shuffle(picked.slice(0,size)).sort(function(a,b){ return (a.f||99999)-(b.f||99999); });
+}
 function startQuiz(type, opts){
   opts=opts||{};
   // 已有同一类型的未完成测验 → 恢复，不重建（切页/刷新后测验不变）
@@ -261,19 +281,13 @@ function startQuiz(type, opts){
   else if(type==='wrong'){
     queue=wrongSorted().slice(0,20);
     if(!queue.length){ toast('错题本还是空的，先做几道题吧'); go('wrongbook'); return; }
-  }else if(type==='spell'){
-    queue=freqSorted().slice(0,20);
   }else{
-    // 认识测验：优先高频词；到期错题并入后统一按词频排序
-    var set={};
-    freqSorted().forEach(function(w){ set[w.w]=w; });
-    wrongDue().slice(0,5).forEach(function(w){ set[w.w]=w; });
-    queue=Object.keys(set).map(function(k){ return set[k]; })
-      .sort(function(a,b){ return (a.f||99999)-(b.f||99999); }).slice(0,20);
+    queue=pickBatch(type, 20);
   }
   if(!queue.length){ toast('没有可测验的单词'); return; }
   S.session={ type:type, mode:'main', queue:queue, idx:0, correct:0,
-              mainWords:queue.slice(), unknown:[], rec:{}, last:null, round:0 };
+              mainWords:queue.slice(), unknown:[], rec:{}, hist:[], round:0 };
+  S.batchNo=(S.batchNo||0)+1;
   save(); go('quiz'); showQuiz();
 }
 function resumeQuiz(){
@@ -317,7 +331,7 @@ function showQuiz(){
   document.getElementById('spellBox').style.display=isSpell?'flex':'none';
   document.getElementById('spellInput').value='';
   document.getElementById('quizTip').textContent='';
-  ss.last=null; save();
+  save();
   if(isSpell) setTimeout(function(){ document.getElementById('spellInput').focus(); },100);
 }
 function advancePhase(){
@@ -326,16 +340,11 @@ function advancePhase(){
     if(ss.type==='spell'){ finishQuiz(); return; }
     if(ss.unknown.length){ ss.queue=shuffle(ss.unknown.slice()); ss.idx=0; ss.mode='retest'; ss.round=1;
       toast('对 '+ss.queue.length+' 个不认识的词再练一遍'); save(); showQuiz(); return; }
-    if(ss.type==='normal'){ ss.queue=shuffle(ss.mainWords.slice()); ss.idx=0; ss.mode='final';
-      toast('全部认识！最后做一次打乱小测'); save(); showQuiz(); return; }
-    finishQuiz(); return;
+    // 全部认识 → 直接进本轮总览（不再重复考同一批 20 词）
+    ss.mode='overview'; save(); go('overview'); renderOverview(); return;
   }
   if(ss.mode==='retest'){
-    if(!ss.unknown.length){
-      if(ss.type==='normal'){ ss.queue=shuffle(ss.mainWords.slice()); ss.idx=0; ss.mode='final';
-        toast('全部认识！最后做一次打乱小测'); save(); showQuiz(); return; }
-      finishQuiz(); return;
-    }
+    if(!ss.unknown.length){ ss.mode='overview'; save(); go('overview'); renderOverview(); return; }
     ss.queue=shuffle(ss.unknown.slice()); ss.idx=0; ss.round=(ss.round||1)+1;
     toast('还有 '+ss.queue.length+' 个词，再来一遍'); save(); showQuiz(); return;
   }
@@ -350,35 +359,42 @@ function checkSpell(){
 function snapshot(w){
   var ss=S.session;
   var rec=ss.rec[w.w]||(ss.rec[w.w]={main:false,retest:false});
-  ss.last={
+  return {
     word:w.w,
     prevWrong:JSON.parse(JSON.stringify(S.wrong[w.w]||null)),
     prevMastered:JSON.parse(JSON.stringify(S.mastered[w.w]||null)),
     prevDaily:JSON.parse(JSON.stringify(S.daily[today()]||null)),
     prevUnknown:JSON.stringify(ss.unknown),
+    prevQueue:JSON.stringify(ss.queue),
     recMain:rec.main, recRetest:rec.retest,
-    idx:ss.idx, correct:ss.correct,
+    idx:ss.idx, correct:ss.correct, mode:ss.mode,
     logLen:S.wrongLog.length,
     isRetest:ss.mode!=='main'
   };
 }
+/* 撤销：答对/答错都能回到答这道题之前的界面（可连续回退） */
 function undo(){
-  var ss=S.session; if(!ss || !ss.last){ toast('没有可撤销的操作'); return; }
-  var L=ss.last, w=L.word;
+  var ss=S.session;
+  if(!ss || !ss.hist || !ss.hist.length){ toast('没有可撤销的题目'); return; }
+  var L=ss.hist.pop(), w=L.word;
   if(L.prevWrong) S.wrong[w]=L.prevWrong; else delete S.wrong[w];
   if(L.prevMastered) S.mastered[w]=L.prevMastered; else delete S.mastered[w];
   if(L.prevDaily) S.daily[today()]=L.prevDaily; else delete S.daily[today()];
   ss.unknown=JSON.parse(L.prevUnknown);
+  ss.queue=JSON.parse(L.prevQueue);
   ss.rec[w]={main:L.recMain, retest:L.recRetest};
-  ss.idx=L.idx; ss.correct=L.correct;
+  ss.idx=L.idx; ss.correct=L.correct; ss.mode=L.mode;
   S.wrongLog.length=L.logLen;
-  ss.last=null; save(); showQuiz(); toast('已撤销这道题');
+  save(); showQuiz(); toast('已撤销「'+w+'」，可以重新作答');
 }
 function answer(known){ reveal(known); }
 function reveal(known){
   var w=S.current, ss=S.session;
-  snapshot(w);
-  if(known) ss.correct++;
+  ss.hist=ss.hist||[];
+  ss.hist.push(snapshot(w));          // 入栈，支持答对/答错都能撤销
+  if(ss.hist.length>30) ss.hist.shift();
+  // 正确率只按主轮（第一遍）统计，重测轮是对主轮不认识词的强化，不计入正确率
+  if(known && ss.mode==='main') ss.correct++;
   var isRetest=ss.mode!=='main';
   var rec=ss.rec[w.w];
   var key=isRetest?'retest':'main';
@@ -420,7 +436,7 @@ function reveal(known){
   document.getElementById('answerReveal').style.display='block';
   document.getElementById('quizActions').style.display='none';
   document.getElementById('revealActions').style.display='flex';
-  document.getElementById('undoBtn').style.display=known?'none':'inline-flex';
+  document.getElementById('undoBtn').style.display='inline-flex';
   document.getElementById('quizTip').textContent=known?'✅ 回答正确':'❌ 已收入错题本，将按遗忘曲线安排复习';
 }
 function nextWord(){
@@ -442,9 +458,33 @@ function markTooEasy(){
 function finishQuiz(){
   var ss=S.session; if(!ss) return;
   var rate=Math.round(ss.correct/Math.max(1,ss.mainWords.length)*100);
+  var type=ss.type;
+  // 推进批内游标，下一套从新词开始，不重复刚做完的这批
+  S.batchCursor=(S.batchCursor||0)+20;
+  S.lastResult={rate:rate, correct:ss.correct, total:ss.mainWords.length, type:type, no:S.batchNo||1};
   S.session=null; save();
-  toast('测验完成！正确率 '+rate+'%（'+ss.correct+'/'+ss.mainWords.length+'）');
-  go('home');
+  toast('第 '+(S.lastResult.no)+' 套完成！正确率 '+rate+'%（'+ss.correct+'/'+ss.mainWords.length+'）');
+  showBatchSummary(S.lastResult);
+}
+/* 一套做完的结算页：可以继续下一套 */
+function showBatchSummary(res){
+  var box=document.getElementById('batchSummary');
+  if(!box) return;
+  var title=res.type==='wrong'?'强化复习':(res.type==='spell'?'拼写测试':'认识测验');
+  box.innerHTML=
+    '<div class="bs-title">第 '+res.no+' 套 · '+title+' 完成</div>'+
+    '<div class="bs-rate">'+res.rate+'<span>%</span></div>'+
+    '<div class="bs-detail">答对 '+res.correct+' / '+res.total+' 个单词</div>'+
+    '<div class="bs-actions">'+
+      '<button class="btn btn-primary" onclick="App.nextBatch()">继续下一套<svg class="btn-ic"><use href="#i-arrow"/></svg></button>'+
+      '<button class="btn btn-ghost" onclick="App.go(\'home\')">回首页</button>'+
+    '</div>';
+  go('batchdone');
+}
+function nextBatch(){
+  var t=(S.lastResult&&S.lastResult.type)||'normal';
+  S.session=null; save();
+  startQuiz(t);
 }
 function finishOverview(){ finishQuiz(); }
 function updateStreak(){
@@ -661,6 +701,7 @@ window.App={
   nextWord:nextWord, undo:undo, markTooEasy:markTooEasy, undoTooEasy:undoTooEasy,
   setWrongRange:setWrongRange, setWrongBrowse:setWrongBrowse, browseMonthShift:browseMonthShift,
   reviewWrong:reviewWrong, toggleNote:toggleNote, finishOverview:finishOverview, finishQuiz:finishQuiz,
+  nextBatch:nextBatch,
   resetPlacement:resetPlacement, exportData:exportData, importData:importData, clearAll:clearAll
 };
 if(location.search.indexOf('test=1')>=0){
