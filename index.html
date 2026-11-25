@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#f6f2e9">
 <title>词频通 · 四六级词汇手册</title>
-<link rel="stylesheet" href="style.css?v=20261125t">
+<link rel="stylesheet" href="style.css?v=20261126k">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 </head>
@@ -64,6 +64,11 @@
         <span class="menu-name">认识测验</span>
         <span class="menu-desc">看词辨义</span>
         <span class="menu-edge"></span>
+      </button>
+      <button class="menu-card" onclick="App.go('college')">
+        <span class="menu-ic"><svg><use href="#i-book"/></svg></span>
+        <span class="menu-name">大学英语</span>
+        <span class="menu-desc" id="collegeStat">教材单元</span>
       </button>
       <button class="menu-card" onclick="App.startQuiz('spell')">
         <span class="menu-ic"><svg><use href="#i-pen"/></svg></span>
@@ -124,6 +129,11 @@
       <span class="step-tag" id="quizTag">认识测验</span>
       <span class="step-progress" id="quizProgress"></span>
     </div>
+    <!-- 顶部工具条：放在不容易误触的位置，且要二次确认 -->
+    <div class="quiz-topbar">
+      <button class="link-btn" onclick="App.resumeQuiz()">继续当前测验</button>
+      <button class="link-btn danger" onclick="App.restartQuiz()">重新开始</button>
+    </div>
     <div class="quiz-card" id="quizCard">
       <div class="quiz-hint" id="quizHint">这个词，你认识吗？</div>
       <div class="word-display" id="quizWord">—</div>
@@ -157,10 +167,6 @@
       <button class="btn btn-primary" onclick="App.nextWord()">下一个<svg class="btn-ic"><use href="#i-arrow"/></svg></button>
     </div>
     <p class="tip" id="quizTip"></p>
-    <div class="quiz-tools">
-      <button class="link-btn" onclick="App.resumeQuiz()">继续当前测验</button>
-      <button class="link-btn" onclick="App.restartQuiz()">重新开始</button>
-    </div>
   </section>
 
   <!-- 太简单列表 -->
@@ -187,10 +193,28 @@
     <div id="batchSummary"></div>
   </section>
 
+  <!-- 大学英语（教材单元） -->
+  <section id="view-college" class="view">
+    <div class="section-title">大学英语</div>
+    <p class="section-sub">按教材单元顺序背。词条取自《新时代大学学术英语综合教程》与《视听说教程》上册的 New Words and Expressions。</p>
+    <div class="book-bar">
+      <button class="range-chip on" data-book="comprehensive" onclick="App.setBook('comprehensive')">综合教程</button>
+      <button class="range-chip" data-book="viewing" onclick="App.setBook('viewing')">视听说教程</button>
+    </div>
+    <div id="unitList" class="unit-list"></div>
+    <div class="fixed-bottom">
+      <button class="btn btn-primary wide" onclick="App.startCollege()" id="collegeStartBtn">开始本单元</button>
+    </div>
+  </section>
+
   <!-- 错题本 -->
   <section id="view-wrongbook" class="view">
     <div class="section-title">错题本</div>
     <p class="section-sub">每个词最多记一次错 · 先测全部，再对答错词打乱重测</p>
+    <div class="book-bar">
+      <button class="range-chip on" data-wb="cet" onclick="App.setWrongBook('cet')">四六级</button>
+      <button class="range-chip" data-wb="college" onclick="App.setWrongBook('college')">大学英语</button>
+    </div>
     <div class="range-bar">
       <span class="range-label">时间</span>
       <button class="range-chip" data-range="1" onclick="App.setWrongRange('1')">一天内</button>
@@ -262,8 +286,8 @@
         </div>
       </div>
       <div class="setting-row danger">
-        <div><div class="setting-name">清空全部数据</div><div class="setting-desc">不可恢复</div></div>
-        <button class="btn btn-danger" onclick="App.clearAll()">清空</button>
+        <div><div class="setting-name">清空全部数据</div><div class="setting-desc">需连续确认两次，不可恢复</div></div>
+        <button class="btn btn-danger" id="clearBtn" onclick="App.clearAll()">清空</button>
       </div>
     </div>
     <p class="about">词频通 · 词表来自 KyleBing/english-vocabulary，音标与例句来自 dictionaryapi.dev 与 CMU 发音词典，词频参考 Google 20k 词表。以通用词频近似考频，仅供学习参考。</p>
@@ -279,7 +303,8 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="data.js?v=20261125t"></script>
-<script src="app.js?v=20261125t"></script>
+<script src="data.js?v=20261126k"></script>
+<script src="book_data.js?v=20261126k"></script>
+<script src="app.js?v=20261126k"></script>
 </body>
 </html>

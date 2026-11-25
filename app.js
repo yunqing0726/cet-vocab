@@ -93,6 +93,131 @@ function trainedPool(){
 }
 function freqSorted(){ return trainedPool().slice().sort(function(a,b){ return (a.f||99999)-(b.f||99999); }); }
 
+/* ---------- 大学英语（教材单元词库） ----------
+   数据来自 book_data.js（window.BOOK_DATA.words），字段：
+   w 单词 / i 音标 / p 词性 / e 英文释义 / z 中文释义 / m 难度标记
+   b 'comprehensive'|'viewing' / u 单元号 / t 单元名 / g 页码
+   这里统一转成和 CET 词条一样的形状（m 是 [{p,t}]），
+   这样 showQuiz / reveal / 总览 / 错题本都能直接复用。 */
+var COLLEGE = (function(){
+  var raw = (window.BOOK_DATA && window.BOOK_DATA.words) || [];
+  return raw.map(function(x){
+    return {
+      w: x.w,
+      ipa: x.i || '',
+      m: [{p: String(x.p||'').replace(/\.+$/,''), t: x.z || ''}],
+      z: x.z || '',
+      en: x.e || '',
+      df: x.e ? [x.e] : [],
+      ph: [], sen: [],
+      mark: x.m || '',
+      book: x.b,
+      unit: x.u,
+      unitTitle: x.t,
+      page: x.g,
+      isCollege: true
+    };
+  });
+})();
+var COLLEGE_MAP = {};
+COLLEGE.forEach(function(x){ COLLEGE_MAP[x.w.toLowerCase()] = x; });
+var BOOK_NAME = {comprehensive:'综合教程', viewing:'视听说教程'};
+var collegeBook = 'comprehensive';
+
+/* ---------- 释义排序：常考词性在前 ----------
+   考试里最常考的是实词（名/动/形/副），虚词（冠/介/连/代/数/助）很少单独考。
+   源数据多数已经是实词在前，这里做一层兜底：把虚词性释义挪到后面，
+   实词内部保持原顺序（源数据本身就是按考频排的，不擅自重排实词）。 */
+var FUNC_POS = {art:1, prep:1, conj:1, pron:1, num:1, aux:1, int:1, pref:1, abbr:1};
+function posBase(p){
+  p=String(p||'').toLowerCase().replace(/\./g,'').trim();
+  p=p.split('&')[0].trim();
+  return p;
+}
+function sortMeanings(list){
+  if(!list || list.length<2) return list;
+  var func=[], content=[];
+  list.forEach(function(x){ (FUNC_POS[posBase(x.p)] ? func : content).push(x); });
+  return content.concat(func);
+}
+/* 四六级词库同样处理一遍（在 DOM 就绪前做一次，之后所有渲染都吃排好序的） */
+ALL.forEach(function(w){ if(w.m && w.m.length>1) w.m=sortMeanings(w.m); });
+
+/* 某本书的单元列表：[{u, title, words:[...]}] */
+function collegeUnits(book){
+  var by = {};
+  COLLEGE.forEach(function(x){
+    if(x.book!==book) return;
+    (by[x.unit] = by[x.unit] || {u:x.unit, title:x.unitTitle, words:[]}).words.push(x);
+  });
+  return Object.keys(by).map(function(k){ return by[k]; })
+    .sort(function(a,b){ return a.u-b.u; });
+}
+/* 单元进度：done = 已认识过的词数 */
+function unitProgress(words){
+  var done = 0;
+  words.forEach(function(x){ if(S.mastered[x.w]) done++; });
+  return {done: done, total: words.length};
+}
+function setBook(b){ collegeBook=b; renderCollege(); }
+
+function renderCollege(){
+  document.querySelectorAll('.book-bar .range-chip').forEach(function(el){
+    if(el.getAttribute('data-book')) el.classList.toggle('on', el.getAttribute('data-book')===collegeBook);
+    if(el.getAttribute('data-wb')) el.classList.toggle('on', el.getAttribute('data-wb')===wrongBook);
+  });
+  var box = document.getElementById('unitList');
+  if(!box) return;
+  if(!COLLEGE.length){
+    box.innerHTML = '<div class="empty"><p>教材词库未加载</p></div>';
+    return;
+  }
+  var units = collegeUnits(collegeBook);
+  box.innerHTML = units.map(function(u){
+    var p = unitProgress(u.words);
+    var pct = p.total ? Math.round(p.done/p.total*100) : 0;
+    var n = collegeCursorLeft(collegeBook, u.u);
+    return '<button class="unit-row" onclick="App.startCollege('+u.u+')">'+
+      '<span class="unit-no">'+u.u+'</span>'+
+      '<span class="unit-main"><b>Unit '+u.u+' · '+esc(u.title)+'</b>'+
+        '<span class="unit-meta">'+p.total+' 个词 · 已掌握 '+p.done+' · 待学 '+n+'</span></span>'+
+      '<span class="unit-pct">'+pct+'%</span></button>';
+  }).join('');
+  var st = document.getElementById('collegeStat');
+  if(st) st.textContent = BOOK_NAME[collegeBook] + ' · ' + COLLEGE.length + ' 词';
+}
+
+/* 单元里还没学的词（按书上页码顺序）；cur 为游标对象 */
+function collegePoolLeft(book, unit){
+  var words = COLLEGE.filter(function(x){ return x.book===book && x.unit===unit; })
+    .slice().sort(function(a,b){ return (a.page||0)-(b.page||0); });
+  return words.filter(function(x){ return !S.mastered[x.w] && !S.tooEasy[x.w]; });
+}
+function collegeCursorLeft(book, unit){ return collegePoolLeft(book, unit).length; }
+
+/* 开始某单元的一批（20 词）；不传 unit 则挑第一个还有词的单元 */
+function startCollege(unit){
+  var units = collegeUnits(collegeBook);
+  if(!units.length){ toast('教材词库还没有加载'); return; }
+  var target = null;
+  if(unit){
+    target = units.filter(function(u){ return u.u===unit; })[0];
+  }else{
+    for(var i=0;i<units.length;i++){
+      if(collegePoolLeft(collegeBook, units[i].u).length){ target=units[i]; break; }
+    }
+    if(!target) target = units[0];
+  }
+  if(!target){ toast('没有可背的单元'); return; }
+  var left = collegePoolLeft(collegeBook, target.u);
+  if(!left.length){
+    toast('Unit '+target.u+' 的词都背完了');
+    return;
+  }
+  var batch = left.slice(0, 20);
+  startQuiz('college', {queue: batch});
+}
+
 /* ---------- FSRS 记忆模型（间隔重复） ----------
    参考 open-spaced-repetition/FSRS（Anki 新版 / 墨墨 / 不背单词 同类）。
    每个错题记录三个量（替换旧的固定 1/2/4/8/16/32 天翻倍）：
@@ -144,6 +269,7 @@ function go(v){
   if(v==='dashboard') renderDash();
   if(v==='settings') renderSettings();
   if(v==='overview') renderOverview();
+  if(v==='college') renderCollege();
   window.scrollTo(0,0);
 }
 function toast(msg){
@@ -183,9 +309,11 @@ function autoSpeak(w){
     if(S.current && S.current.w===w.w) speak(true);
   }, 180);
 }
-/* 播放某个指定单词（首页预测卡片点词时用） */
+/* 播放某个指定单词（首页预测卡片、总览页点词时用） */
 function speakWord(word){
-  var w=trainedPool().filter(function(x){ return x.w===word; })[0] || S.current;
+  var w=trainedPool().filter(function(x){ return x.w===word; })[0]
+     || COLLEGE.filter(function(x){ return x.w===word; })[0]
+     || S.current;
   if(!w) return;
   try{
     if(currentAudio){ currentAudio.pause(); currentAudio.currentTime=0; }
@@ -228,8 +356,7 @@ window.addEventListener('resize',function(){
 /* ---------- 首屏 ---------- */
 function renderHome(){
   var wrongN=Object.keys(S.wrong).length;
-  document.getElementById('wrongCount').textContent=wrongN?wrongN+' 个待强化':'遗忘曲线强化';
-  var masteredN=Object.keys(S.mastered).length;
+  document.getElementById('wrongCount').textContent=wrongN?wrongN+' 个待强化':'遗忘曲线强化';  var masteredN=Object.keys(S.mastered).length;
   var teN=Object.keys(S.tooEasy).length;
   var vocabTxt = S.vocabSize ? (S.vocabSize>=99999?'≥2万':('≈'+S.vocabSize)) : '—';
   document.getElementById('homeStats').innerHTML=
@@ -238,6 +365,12 @@ function renderHome(){
     '<div class="hstat"><b>'+S.streak+'</b><span>连续打卡</span></div>';
   var teStat=document.getElementById('tooEasyStat');
   if(teStat) teStat.textContent=teN?teN+' 个已标记':'太简单';
+  var colStat=document.getElementById('collegeStat');
+  if(colStat){
+    var colDone=0;
+    COLLEGE.forEach(function(x){ if(S.mastered[x.w]) colDone++; });
+    colStat.textContent = COLLEGE.length ? ('已背 '+colDone+'/'+COLLEGE.length) : '教材单元';
+  }
   // 自适应预测卡片：显示模型认为的「重点但可能不会」的词
   var predBox=document.getElementById('predictBox');
   if(predBox){
@@ -403,6 +536,16 @@ function wrongSorted(){
     return (db-ib)-(da-ia) || (y.n-x.n);
   });
 }
+/* 大学英语的错题列表（按 FSRS 到期优先） */
+function collegeWrongSorted(){
+  var now=ts();
+  return COLLEGE.filter(function(w){ return !!S.wrong[w.w]; }).sort(function(a,b){
+    var x=S.wrong[a.w],y=S.wrong[b.w];
+    var da=(now-(x.last||x.first))/86400000, db=(now-(y.last||y.first))/86400000;
+    var ia=fsrsInterval(x.S,FSRS_TARGET_R), ib=fsrsInterval(y.S,FSRS_TARGET_R);
+    return (db-ib)-(da-ia) || (y.n-x.n);
+  });
+}
 /* ---------- 自适应选题引擎（能力值 θ + 词难度 b 的 IRT/ELO 混合） ----------
    参考 Duolingo Birdbrain（ELO）与标准 IRT（最大信息量选题/@Python adaptivetesting）：
    - 每个词的难度 b = log10(词频 f)，词越生僻 b 越大（与 app 的词频刻度一致）
@@ -560,7 +703,7 @@ function pickBatch(type, size){
 function startQuiz(type, opts){
   opts=opts||{};
   // 已有同一类型的未完成测验 → 恢复，不重建（切页/刷新后测验不变）
-  if(S.session && S.session.type===type && S.session.queue && S.session.queue.length){
+  if(!opts.queue && S.session && S.session.type===type && S.session.queue && S.session.queue.length){
     go(S.session.mode==='overview'?'overview':'quiz');
     if(S.session.mode==='overview') renderOverview(); else showQuiz();
     return;
@@ -570,6 +713,11 @@ function startQuiz(type, opts){
   else if(type==='wrong'){
     queue=wrongSorted().slice(0,20);
     if(!queue.length){ toast('错题本还是空的，先做几道题吧'); go('wrongbook'); return; }
+  }else if(type==='college'){
+    // 大学英语：opts.queue 由 startCollege 传入，正常不会走到这里
+    var u=collegeUnits(collegeBook);
+    queue = u.length ? collegePoolLeft(collegeBook, u[0].u).slice(0,20) : [];
+    if(!queue.length){ toast('没有可背的单词'); go('college'); return; }
   }else{
     // 认识测验走自适应选题；拼写测验沿用顺序取词
     queue=(type==='normal') ? pickAdaptive(type, 20) : pickBatch(type, 20);
@@ -587,15 +735,17 @@ function resumeQuiz(){
 }
 function restartQuiz(){
   if(!S.session) return;
+  if(!confirm('重新开始会丢弃当前这一套的进度，确定吗？')) return;
   var t=S.session.type; S.session=null; save(); toast('已重新开始测验'); startQuiz(t);
 }
 function phaseLabel(){
   var ss=S.session;
   if(!ss) return '';
-  if(ss.mode==='main') return '认识测验';
+  var base = ss.type==='college' ? '大学英语' : '认识测验';
+  if(ss.mode==='main') return base;
   if(ss.mode==='retest') return '再认一遍 · 第'+(ss.round||1)+'轮';
   if(ss.mode==='final') return '打乱小测';
-  return '认识测验';
+  return base;
 }
 function showQuiz(){
   var ss=S.session;
@@ -607,8 +757,7 @@ function showQuiz(){
   if(ss.queue[ss.idx+1]) preloadAudio(ss.queue[ss.idx+1]);
   autoSpeak(w);
   var isSpell=ss.type==='spell';
-  document.getElementById('quizTag').textContent=ss.type==='wrong'?'强化复习':phaseLabel();
-  var total=ss.mode==='final'?ss.mainWords.length:ss.queue.length;
+  document.getElementById('quizTag').textContent=ss.type==='wrong'?'强化复习':phaseLabel();  var total=ss.mode==='final'?ss.mainWords.length:ss.queue.length;
   document.getElementById('quizProgress').textContent=(ss.idx+1)+' / '+total;
   document.getElementById('quizWord').textContent=isSpell?'—':w.w;
   fitWord(document.getElementById('quizWord'));
@@ -697,7 +846,7 @@ function reveal(known){
     rec[key]=true;
     var x=S.wrong[w.w]||{n:0,rep:0,first:ts(),S:0.5,D:5};
     if(allowed){
-      x.n++; x.level=w.l;
+      x.n++; x.level=w.l; x.college=!!w.isCollege;
       fsrsUpdate(x, false, (ts()-(x.last||x.first))/86400000);
       S.wrong[w.w]=x;
       S.wrongLog.push({w:w.w, ts:ts(), date:today(), type:ss.type}); updateStreak();
@@ -720,7 +869,7 @@ function reveal(known){
   lb.n++; if(known) lb.ok++; lb.last=ts();
   S.learned[w.w]=lb;
   // 自适应：每答一题都更新能力值（只有主轮计入，重测轮是对同批词的强化，不重复算能力）
-  if(ss.mode==='main' && (ss.type==='normal'||ss.type==='wrong')) updateTheta(known, w);
+  if(ss.mode==='main' && !w.isCollege && (ss.type==='normal'||ss.type==='wrong')) updateTheta(known, w);
   save();
 
   var mean=(w.m||[]).map(function(x){ return (x.p?'<span class="pos">'+esc(x.p)+'.</span>':'')+esc(x.t); }).join('；');
@@ -737,7 +886,13 @@ function reveal(known){
   else if(w.ex){ parts.push('例：'+w.ex); }
   ex.textContent=parts.length?parts.join('\n'):'提示：'+w.w+' 的常见搭配请结合释义记忆';
   ex.style.display='block';
-  document.getElementById('answerFreq').textContent=w.f>0&&w.f<90000?('词频排名 #'+w.f+' · '+(w.l===4?'四级':'六级')+'词'):((w.l===4?'四级':'六级')+'词汇');
+  var fb=document.getElementById('answerFreq');
+  if(w.isCollege){
+    var markTxt={'*':'提高目标','★':'提高目标','▲':'发展目标','Ⓐ':'学术词汇 AWL'}[w.mark]||'';
+    fb.textContent='大学英语 · '+BOOK_NAME[w.book]+' Unit '+w.unit+(markTxt?' · '+markTxt:'');
+  }else{
+    fb.textContent=w.f>0&&w.f<90000?('词频排名 #'+w.f+' · '+(w.l===4?'四级':'六级')+'词'):((w.l===4?'四级':'六级')+'词汇');
+  }
   document.getElementById('answerReveal').style.display='block';
   document.getElementById('quizActions').style.display='none';
   document.getElementById('revealActions').style.display='flex';
@@ -776,20 +931,23 @@ function finishQuiz(){
 function showBatchSummary(res){
   var box=document.getElementById('batchSummary');
   if(!box) return;
-  var title=res.type==='wrong'?'强化复习':(res.type==='spell'?'拼写测试':'认识测验');
+  var title=res.type==='wrong'?'强化复习':(res.type==='spell'?'拼写测试':(res.type==='college'?'大学英语':'认识测验'));
+  var backView = res.type==='college' ? 'college' : 'home';
+  var backLabel = res.type==='college' ? '回单元列表' : '回首页';
   box.innerHTML=
     '<div class="bs-title">第 '+res.no+' 套 · '+title+' 完成</div>'+
     '<div class="bs-rate">'+res.rate+'<span>%</span></div>'+
     '<div class="bs-detail">答对 '+res.correct+' / '+res.total+' 个单词</div>'+
     '<div class="bs-actions">'+
       '<button class="btn btn-primary" onclick="App.nextBatch()">继续下一套<svg class="btn-ic"><use href="#i-arrow"/></svg></button>'+
-      '<button class="btn btn-ghost" onclick="App.go(\'home\')">回首页</button>'+
+      '<button class="btn btn-ghost" onclick="App.go(\''+backView+'\')">'+backLabel+'</button>'+
     '</div>';
   go('batchdone');
 }
 function nextBatch(){
   var t=(S.lastResult&&S.lastResult.type)||'normal';
   S.session=null; save();
+  if(t==='college'){ startCollege(); return; }
   startQuiz(t);
 }
 function finishOverview(){ finishQuiz(); }
@@ -829,11 +987,21 @@ function undoTooEasy(word){
 /* ---------- 错题本（时间范围筛选 + 按日期浏览） ---------- */
 var wrongRange='all';        // '1'|'3'|'7'|'all'
 var wrongBrowse=false;       // false=遗忘曲线排序 true=按日期浏览
+var wrongBook='cet';         // 'cet'=四六级词库 'college'=大学英语词库（两本独立）
 var browseYear=0, browseMonth=0;
+function setWrongBook(b){ wrongBook=b; renderWrong(); }
+/* 按来源取错题词条：四六级走 CET 词池，大学英语走教材词库 */
+function wrongPoolByBook(){
+  if(wrongBook==='college') return COLLEGE.slice();
+  return trainedPool();
+}
 function wrongFiltered(){
   var now=ts();
-  return trainedPool().filter(function(w){
+  return wrongPoolByBook().filter(function(w){
     var x=S.wrong[w.w]; if(!x) return false;
+    // 两本互不串：老数据没有 college 标记时按词是否在教材词库里判定
+    var isCol = (x.college!==undefined) ? !!x.college : !!COLLEGE_MAP[w.w.toLowerCase()];
+    if(wrongBook==='college' ? !isCol : isCol) return false;
     if(wrongRange==='all') return true;
     var days=parseInt(wrongRange,10);
     return (now-(x.last||x.first))/86400000 <= days;
@@ -846,6 +1014,7 @@ function browseMonthShift(n){
 }
 function renderWrong(){
   document.querySelectorAll('.range-chip').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-range')===wrongRange); });
+  document.querySelectorAll('.book-bar .range-chip[data-wb]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-wb')===wrongBook); });
   var browseBtn=document.getElementById('browseBtn'), browseBtn2=document.getElementById('browseBtn2');
   if(browseBtn){ browseBtn.classList.toggle('on',!wrongBrowse); }
   if(browseBtn2){ browseBtn2.classList.toggle('on',wrongBrowse); }
@@ -853,7 +1022,8 @@ function renderWrong(){
   document.getElementById('reviewBtn').style.display=list.length?'block':'none';
   var box=document.getElementById('wrongList');
   if(!list.length){
-    box.innerHTML='<div class="empty"><p>这个时间范围内没有错题</p><p style="font-size:13px;margin-top:6px">答错的单词会自动收进来</p></div>';
+    box.innerHTML='<div class="empty"><p>这个时间范围内没有错题</p><p style="font-size:13px;margin-top:6px">'+
+      (wrongBook==='college'?'去「大学英语」里做几套，答错的词会收进这里':'答错的单词会自动收进来')+'</p></div>';
     if(wrongBrowse) renderWrongByDate();
     return;
   }
@@ -882,7 +1052,12 @@ function renderWrongByDate(){
   var prefix=browseYear+'-'+String(browseMonth+1).padStart(2,'0');
   var byDate={};
   (S.wrongLog||[]).forEach(function(it){
-    if(it.date && it.date.indexOf(prefix)===0){ (byDate[it.date]=byDate[it.date]||[]).push(it.w); }
+    if(!it.date || it.date.indexOf(prefix)!==0) return;
+    // 两本错题本按「这个词属于哪本」分开统计
+    var x=S.wrong[it.w];
+    var isCol = x && x.college!==undefined ? !!x.college : !!COLLEGE_MAP[String(it.w).toLowerCase()];
+    if(wrongBook==='college' ? !isCol : isCol) return;
+    (byDate[it.date]=byDate[it.date]||[]).push(it.w);
   });
   var dates=Object.keys(byDate).sort().reverse();
   var html='<div class="month-nav"><button onclick="App.browseMonthShift(-1)">‹ 上月</button>'+
@@ -902,7 +1077,6 @@ function reviewWrong(){
   if(!list.length){ toast('这个时间范围内没有错题'); return; }
   startQuiz('wrong',{queue:shuffle(list.slice())});
 }
-
 /* ---------- 总览（20 词，注释可点开） ---------- */
 function noteHTML(w){
   var mean=(w.m||[]).map(function(x){ return (x.p?'<span class="pos">'+esc(x.p)+'.</span>':'')+esc(x.t); }).join('；');
@@ -920,12 +1094,13 @@ function renderOverview(){
   box.innerHTML=list.map(function(w,i){
     var mean=(w.m[0]&&w.m[0].t)||'';
     return '<div class="ov-item"><button class="ov-toggle" onclick="App.toggleNote('+i+')">'+
-      '<span class="ov-num">'+(i+1)+'</span><span class="ov-w">'+esc(w.w)+'</span>'+
+      '<span class="ov-num">'+(i+1)+'</span>'+
+      '<span class="ov-w" onclick="event.stopPropagation();App.speakWord(\''+esc(w.w)+'\')" title="点击发音">'+esc(w.w)+'</span>'+
       '<span class="ov-ipa">'+(w.ipa||'')+'</span><span class="ov-mean">'+esc(mean)+'</span>'+
       '<span class="ov-caret">▾</span></button>'+
       '<div class="ov-note" id="ovnote'+i+'" style="display:none">'+noteHTML(w)+'</div></div>';
   }).join('');
-  document.getElementById('overviewCount').textContent=list.length+' 个单词 · 点单词展开注释';
+  document.getElementById('overviewCount').textContent=list.length+' 个单词 · 点单词读音，点其他位置展开注释';
 }
 function toggleNote(i){
   var el=document.getElementById('ovnote'+i); if(!el) return;
@@ -1302,19 +1477,39 @@ function blankState(){
     theta:0,thetaN:0,adaptiveLog:[],adaptiveSeen:{},learned:{},
     batchCursor:0,batchNo:0,lastResult:null};
 }
+/* 清空数据：两步确认。第一步系统弹窗，第二步要把按钮再按一次，
+   这样误触/连点都不会直接清空（连点两次同位置的间隔太短，会被冷却挡住）。 */
+var clearArmedUntil = 0;
 function clearAll(){
-  if(!confirm('确定清空所有学习数据？此操作不可恢复！')) return;
-  if(!confirm('再次确认：真的要删除全部错题本和进度吗？')) return;
+  var btn = document.getElementById('clearBtn');
+  var now = ts();
+  if(now > clearArmedUntil){
+    if(!confirm('清空会删除全部错题本、学习进度和打卡记录，且不可恢复。\n\n要继续吗？')) return;
+    clearArmedUntil = now + 8000;            // 8 秒内有效
+    if(btn){ btn.textContent = '再点一次确认'; btn.classList.add('armed'); }
+    toast('再点一次「再点一次确认」才会清空（8 秒内有效）');
+    setTimeout(function(){
+      if(clearArmedUntil && ts() >= clearArmedUntil - 10 && btn){
+        btn.textContent = '清空'; btn.classList.remove('armed'); clearArmedUntil = 0;
+      }
+    }, 8200);
+    return;
+  }
+  // 第二步：真的清
+  clearArmedUntil = 0;
+  if(btn){ btn.textContent = '清空'; btn.classList.remove('armed'); }
   localStorage.removeItem(LS);
+  localStorage.removeItem(LS + '_bak');
   var lv=S.level||'both', acc=S.accent||2;
   S=blankState(); S.level=lv; S.accent=acc;
-  save(); toast('已清空'); go('home');
+  save(); toast('已清空全部数据'); go('home');
 }
 
 /* ---------- 启动 ---------- */
 if(location.search.indexOf('test=1')>=0){ window.confirm=function(){return true;}; window.alert=function(){}; }
 window.App={
   go:go, setLevel:setLevel, startQuiz:startQuiz, resumeQuiz:resumeQuiz, restartQuiz:restartQuiz,
+  startCollege:startCollege, setBook:setBook, setWrongBook:setWrongBook,
   startPlacement:startPlacement, speak:speak, toggleAccent:toggleAccent, placeAnswer:placeAnswer, answer:answer, checkSpell:checkSpell,
   nextWord:nextWord, undo:undo, markTooEasy:markTooEasy, undoTooEasy:undoTooEasy,
   setWrongRange:setWrongRange, setWrongBrowse:setWrongBrowse, browseMonthShift:browseMonthShift,
