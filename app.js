@@ -29,6 +29,7 @@ var S = {
   placeAnswers: [],
   theta: 0,              // 能力值（log10 词频刻度）：越大=认识越生僻的词
   thetaN: 0,             // 已用于更新的答题次数（决定每次更新的步长）
+  thetaSeq: 0,           // 第几次能力更新（改答时判断能否回滚）
   adaptiveLog: [],       // [{ts, theta, known, w}] 能力变化轨迹（调试/展示用）
   /* 下面这些必须在这里声明：load() 只认识 S 里已有的键，
      以前没声明 → 每次刷新/更新版本都被丢掉，题目就从 address 从头开始 */
@@ -578,15 +579,66 @@ function predictP(w,theta){
   z=Math.max(-8,Math.min(8,z));
   return 1/(1+Math.exp(z));
 }
+/* 单步能力值更新（纯函数版，供重放用；逻辑与 updateTheta 一致） */
+function thetaApply(theta,n,known,wObj){
+  var b=wordB(wObj);
+  var z=Math.max(-8,Math.min(8,(b-theta)/ADAPT_S));
+  var p=1/(1+Math.exp(z));
+  var k=ADAPT_K0/Math.sqrt(1+n*0.35);
+  var err=(known?1:0)-p;
+  return {theta:Math.max(-0.5,Math.min(5.2,theta+k*err)), n:n+1};
+}
 function updateTheta(known,w){
   var b=wordB(w), p=predictP(w);
   var k=ADAPT_K0/Math.sqrt(1+(S.thetaN||0)*0.35);   // 步长随答题数衰减
   var err=(known?1:0)-p;
   S.theta=Math.max(-0.5,Math.min(5.2,(S.theta||0)+k*err));
   S.thetaN=(S.thetaN||0)+1;
+  S.thetaSeq=(S.thetaSeq||0)+1;      // 这次更新的序号，改答时用来定位记录
   S.adaptiveLog=S.adaptiveLog||[];
-  S.adaptiveLog.push({ts:ts(), theta:Math.round(S.theta*1000)/1000, known:!!known, w:w.w});
+  S.adaptiveLog.push({ts:ts(), seq:S.thetaSeq, w:w.w, known:!!known, theta:Math.round(S.theta*1000)/1000});
   if(S.adaptiveLog.length>500) S.adaptiveLog.shift();
+}
+/* 从会话记录重放能力值：改答/撤销后保证 θ 与作答记录一致。
+   只重放本套测验期间的答题，范围有界、结果精确。 */
+/* 从会话记录重放能力值：改答/撤销后保证 θ 与作答记录一致。
+   按「题目在队列里的顺序」重放，所以先改哪一题都不影响最终 θ。
+   只重放本套测验期间的答题，范围有界、结果精确。 */
+function replayTheta(){
+  var ss=S.session;
+  if(!ss) return;
+  // 老会话（本功能上线前创建的）没有基线，重放会算错，直接跳过
+  if(ss.thetaStart===undefined || ss.adapStart===undefined) return;
+  var th=ss.thetaStart, n=ss.thetaNStart||0;
+  var answered=[];
+  var wm=wordMap();
+  // 必须用 mainWords（主轮原始 20 词）而不是 queue：进入重测轮后 queue 只剩不认识的那几个，
+  // 只用 queue 会把主轮已答的题全丢掉，θ 就只算了重测那几个。
+  var seenW={}, ordered=(ss.mainWords&&ss.mainWords.length?ss.mainWords.slice():[]);
+  (ss.queue||[]).forEach(function(w){ if(!seenW[w.w]){ seenW[w.w]=1; if(ordered.indexOf(w)<0) ordered.push(w); } });
+  ordered.forEach(function(w,i){
+    ['main','retest','final'].forEach(function(m){
+      var a=ss.ans && ss.ans[ansKey(m,w.w)];
+      if(a && a.thetaCounted) answered.push({i:i, w:wm[w.w]||w, known:a.known});
+    });
+  });
+  answered.sort(function(a,b){ return a.i-b.i; });
+  S.adaptiveLog=(S.adaptiveLog||[]).slice(0, ss.adapStart);
+  for(var j=0;j<answered.length;j++){
+    var it=answered[j];
+    var r=thetaApply(th,n,it.known,it.w); th=r.theta; n=r.n;
+    S.adaptiveLog.push({ts:ts(), seq:j, w:it.w.w, known:!!it.known, theta:Math.round(th*1000)/1000});
+  }
+  S.theta=th; S.thetaN=n;
+}
+/* 词名 → 词条 的查表（replayTheta 每题都查，避免每次都遍历整个词库） */
+var _wordMap=null;
+function wordMap(){
+  if(_wordMap) return _wordMap;
+  _wordMap={};
+  ALL.forEach(function(w){ _wordMap[w.w]=w; });
+  Object.keys(COLLEGE_MAP).forEach(function(k){ _wordMap[k]=COLLEGE_MAP[k]; });
+  return _wordMap;
 }
 /* 重点程度：在当前可背词池里，词频越靠前越重点（0~1）。
    注意必须用「当前词池」的实际词频范围归一化，否则跳过简单词后
@@ -733,7 +785,8 @@ function startQuiz(type, opts){
   }
   if(!queue.length){ toast('没有可测验的单词'); return; }
   S.session={ type:type, mode:'main', queue:queue, idx:0, correct:0,
-              mainWords:queue.slice(), unknown:[], rec:{}, hist:[], round:0 };
+              mainWords:queue.slice(), unknown:[], rec:{}, hist:[], ans:{}, round:0,
+              thetaStart:S.theta||0, thetaNStart:S.thetaN||0, adapStart:(S.adaptiveLog||[]).length };
   S.batchNo=(S.batchNo||0)+1;
   save(); go('quiz'); showQuiz();
 }
@@ -750,7 +803,7 @@ function restartQuiz(){
 function phaseLabel(){
   var ss=S.session;
   if(!ss) return '';
-  var base = ss.type==='college' ? '大学英语' : '认识测验';
+  var base = ss.type==='college' ? '大学英语' : (ss.type==='spell' ? '拼写测试' : '认识测验');
   if(ss.mode==='main') return base;
   if(ss.mode==='retest') return '再认一遍 · 第'+(ss.round||1)+'轮';
   if(ss.mode==='final') return '打乱小测';
@@ -775,10 +828,12 @@ function showQuiz(){
   document.getElementById('answerReveal').style.display='none';
   document.getElementById('quizActions').style.display=isSpell?'none':'flex';
   document.getElementById('revealActions').style.display='none';
+  document.getElementById('changeActions').style.display='none';
   document.getElementById('undoBtn').style.display='none';
   document.getElementById('spellBox').style.display=isSpell?'flex':'none';
   document.getElementById('spellInput').value='';
   document.getElementById('quizTip').textContent='';
+  renderAnsStrip();
   save();
   if(isSpell) setTimeout(function(){ document.getElementById('spellInput').focus(); },100);
 }
@@ -817,7 +872,7 @@ function snapshot(w){
     recMain:rec.main, recRetest:rec.retest,
     idx:ss.idx, correct:ss.correct, mode:ss.mode,
     logLen:S.wrongLog.length,
-    prevTheta:S.theta, prevThetaN:S.thetaN, prevAdaptiveLogLen:(S.adaptiveLog||[]).length,
+    prevTheta:S.theta, prevThetaN:S.thetaN, prevThetaSeq:S.thetaSeq, prevAdaptiveLogLen:(S.adaptiveLog||[]).length,
     isRetest:ss.mode!=='main'
   };
 }
@@ -833,24 +888,69 @@ function undo(){
   ss.queue=JSON.parse(L.prevQueue);
   ss.rec[w]={main:L.recMain, retest:L.recRetest};
   ss.idx=L.idx; ss.correct=L.correct; ss.mode=L.mode;
+  // 撤销这一题的作答记录，否则题号条会显示旧答案、再答一次会重复回滚
+  if(ss.ans){ delete ss.ans[ansKey(L.mode,w)]; }
   S.wrongLog.length=L.logLen;
   // 撤销时把能力值也回滚，否则撤销会双重计数
-  if(L.prevTheta!==undefined){ S.theta=L.prevTheta; S.thetaN=L.prevThetaN; }
   if(L.prevAdaptiveLogLen!==undefined) (S.adaptiveLog||[]).length=L.prevAdaptiveLogLen;
+  if(L.prevTheta!==undefined){ S.theta=L.prevTheta; S.thetaN=L.prevThetaN; }
+  else replayTheta();
   save(); showQuiz(); toast('已撤销「'+w+'」，可以重新作答');
 }
 function answer(known){ reveal(known); }
+/* 题号条的键：mode + 词，区分「第一遍」和「重测轮」 */
+function ansKey(mode,w){ return mode+':'+w; }
+/* 把某一题上一次作答的影响彻底撤回（改答/回看用），不碰其他题 */
+function revertWordAnswer(w, mode){
+  var ss=S.session;
+  var k=ansKey(mode,w.w), a=ss.ans&&ss.ans[k];
+  if(!a) return false;
+  if(a.prevWrong) S.wrong[w.w]=a.prevWrong; else delete S.wrong[w.w];
+  if(a.prevMastered) S.mastered[w.w]=a.prevMastered; else delete S.mastered[w.w];
+  if(a.prevLearned) S.learned[w.w]=a.prevLearned; else delete S.learned[w.w];
+  ss.rec[w.w]={main:a.prevRecMain, retest:a.prevRecRetest};
+  if(a.wasUnknown){ if(!ss.unknown.some(function(y){return y.w===w.w;})) ss.unknown.push(w); }
+  else ss.unknown=ss.unknown.filter(function(y){ return y.w!==w.w; });
+  if(a.logTs) S.wrongLog=S.wrongLog.filter(function(it){ return !(it.w===w.w && it.ts===a.logTs); });
+  if(a.countedCorrect && ss.correct>0) ss.correct--;
+  var day=S.daily[today()];
+  if(day){
+    day.total=Math.max(0,(day.total||0)-1);
+    if(a.known) day.correct=Math.max(0,(day.correct||0)-1);
+    if(a.wasNew) day.new=Math.max(0,(day.new||0)-1);
+  }
+  // 能力值：删掉这一题的作答记录后整段重放（按题序算，先改哪题结果都一样）
+  delete ss.ans[k];                     // 必须先删，重放才看不到旧答案
+  if(a.thetaCounted){ replayTheta(); }
+  return true;
+}
 function reveal(known){
   var w=S.current, ss=S.session;
   ss.hist=ss.hist||[];
   ss.hist.push(snapshot(w));          // 入栈，支持答对/答错都能撤销
   if(ss.hist.length>30) ss.hist.shift();
-  // 正确率只按主轮（第一遍）统计，重测轮是对主轮不认识词的强化，不计入正确率
-  if(known && ss.mode==='main') ss.correct++;
+  ss.ans=ss.ans||{};
   var isRetest=ss.mode!=='main';
   var rec=ss.rec[w.w];
   var key=isRetest?'retest':'main';
+  var k=ansKey(ss.mode,w.w);
+  // 改答：先把上一次选择的影响撤干净，再按新答案重算
+  if(ss.ans[k]) revertWordAnswer(w, ss.mode);
+  if(!ss.rec[w.w]) ss.rec[w.w]={main:false,retest:false};
+  rec=ss.rec[w.w];
+  // 记录「答这一题之前」的状态
+  var prevWrongSnap=JSON.parse(JSON.stringify(S.wrong[w.w]||null));
+  var prevMasteredSnap=JSON.parse(JSON.stringify(S.mastered[w.w]||null));
+  var prevLearnedSnap=S.learned[w.w]?JSON.parse(JSON.stringify(S.learned[w.w])):null;
+  var wasUnknown=ss.unknown.some(function(y){ return y.w===w.w; });
+  var prevRecMain=rec.main, prevRecRetest=rec.retest;
+  var wasNew=!S.mastered[w.w];
+  var countedCorrect=!!(known && ss.mode==='main');
+  var thetaBefore=S.theta, thetaNBefore=S.thetaN, adapIdx=(S.adaptiveLog||[]).length;
   var allowed=ss.type==='normal' ? !rec[key] : (!rec.main && !rec.retest);
+  // 正确率只按主轮（第一遍）统计，重测轮是对主轮不认识词的强化，不计入正确率
+  if(countedCorrect) ss.correct++;
+  var logTsAdded=0;
   if(!known){
     rec[key]=true;
     var x=S.wrong[w.w]||{n:0,rep:0,first:ts(),S:0.5,D:5};
@@ -858,7 +958,8 @@ function reveal(known){
       x.n++; x.level=w.l; x.college=!!w.isCollege;
       fsrsUpdate(x, false, (ts()-(x.last||x.first))/86400000);
       S.wrong[w.w]=x;
-      S.wrongLog.push({w:w.w, ts:ts(), date:today(), type:ss.type}); updateStreak();
+      logTsAdded=ts();
+      S.wrongLog.push({w:w.w, ts:logTsAdded, date:today(), type:ss.type}); updateStreak();
     } else S.wrong[w.w]=x;
     // 加入本轮不认识列表
     if(!ss.unknown.some(function(y){ return y.w===w.w; })) ss.unknown.push(w);
@@ -871,16 +972,28 @@ function reveal(known){
   }
   var d=today(), day=S.daily[d]||{new:0,correct:0,total:0};
   day.total++; if(known) day.correct++;
-  if(!S.mastered[w.w]||S.mastered[w.w].n===1) day.new++;
+  if(wasNew) day.new++;
   S.daily[d]=day; updateStreak();
   // 永久学习账本：每个做过的词都记（跨版本不丢，选题靠它避开做过的词）
   var lb=S.learned[w.w]||{n:0, ok:0, first:ts(), last:0};
   lb.n++; if(known) lb.ok++; lb.last=ts();
   S.learned[w.w]=lb;
-  // 自适应：每答一题都更新能力值（只有主轮计入，重测轮是对同批词的强化，不重复算能力）
-  if(ss.mode==='main' && !w.isCollege && (ss.type==='normal'||ss.type==='wrong')) updateTheta(known, w);
+  // 自适应能力值（只有主轮计；重测轮是对同批词的强化，不重复算能力）
+  var thetaCounted = !!(ss.mode==='main' && !w.isCollege && (ss.type==='normal'||ss.type==='wrong'));
+  // 记住这一题，供题号条回看/改答
+  ss.ans[k]={known:!!known, mode:ss.mode,
+    prevWrong:prevWrongSnap, prevMastered:prevMasteredSnap, prevLearned:prevLearnedSnap,
+    wasUnknown:wasUnknown, wasNew:wasNew, prevRecMain:prevRecMain, prevRecRetest:prevRecRetest,
+    logTs:logTsAdded, countedCorrect:countedCorrect, thetaCounted:thetaCounted,
+    thetaBefore:thetaBefore, thetaNBefore:thetaNBefore, adapIdx:adapIdx};
+  // 能力值统一按「题序重放」得出：实时作答和回看改答走同一条路径，结果只与答案集合有关
+  replayTheta();
   save();
-
+  renderReveal(w, known);
+  renderAnsStrip();
+}
+/* 只负责把答案区渲染出来（不写状态），reveal 和「回看已答题目」共用 */
+function renderReveal(w, known){
   var mean=(w.m||[]).map(function(x){ return (x.p?'<span class="pos">'+esc(x.p)+'.</span>':'')+esc(x.t); }).join('；');
   document.getElementById('answerMean').innerHTML='<span class="pos" style="font-family:Times New Roman,serif">'+esc(w.w)+' '+esc(w.ipa||'')+'</span><br>'+(mean||'—');
   var pb=document.getElementById('answerPhrases');
@@ -905,8 +1018,38 @@ function reveal(known){
   document.getElementById('answerReveal').style.display='block';
   document.getElementById('quizActions').style.display='none';
   document.getElementById('revealActions').style.display='flex';
+  document.getElementById('changeActions').style.display='none';
   document.getElementById('undoBtn').style.display='inline-flex';
   document.getElementById('quizTip').textContent=known?'✅ 回答正确':'❌ 已收入错题本，将按遗忘曲线安排复习';
+}
+/* 题号条：本轮每道题一个圆点。绿=认识，红=不认识，当前题描边。点已答过的可以回去改答。 */
+function renderAnsStrip(){
+  var ss=S.session; var box=document.getElementById('ansStrip');
+  if(!box) return;
+  if(!ss || !ss.queue || !ss.queue.length || ss.mode==='overview'){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='flex';
+  box.innerHTML=ss.queue.map(function(w,i){
+    var a=ss.ans && ss.ans[ansKey(ss.mode,w.w)];
+    var cls='ans-dot';
+    if(i===ss.idx) cls+=' cur';
+    if(a) cls+=a.known?' ok':' bad';
+    return '<button class="'+cls+'" onclick="App.jumpTo('+i+')" title="第'+(i+1)+'题 '+esc(w.w)+'">'+(i+1)+'</button>';
+  }).join('');
+}
+/* 跳到第 i 题。已答过的会把答案亮出来，并给出「改为认识/改为不认识」两个按钮。 */
+function jumpTo(i){
+  var ss=S.session;
+  if(!ss || !ss.queue) return;
+  i=parseInt(i,10);
+  if(isNaN(i) || i<0 || i>=ss.queue.length) return;
+  ss.idx=i; save(); showQuiz();
+  var w=ss.queue[i], a=ss.ans && ss.ans[ansKey(ss.mode,w.w)];
+  if(a){
+    renderReveal(w, a.known);
+    document.getElementById('revealActions').style.display='none';
+    document.getElementById('changeActions').style.display='flex';
+    document.getElementById('quizTip').textContent='第 '+(i+1)+' 题你之前选了「'+(a.known?'认识':'不认识')+'」，可以改成另一个';
+  }
 }
 function nextWord(){
   var ss=S.session; ss.idx++; save(); showQuiz();
@@ -1516,7 +1659,7 @@ function blankState(){
     mastered:{},tooEasy:{},tooEasyLog:[],wrong:{},wrongLog:[],daily:{},streak:0,
     accent:2,lastActive:'',session:null,current:null,
     placePool:[],placeAsked:{},placeIdx:0,placeCorrect:0,placeAnswers:[],
-    theta:0,thetaN:0,adaptiveLog:[],adaptiveSeen:{},learned:{},
+    theta:0,thetaN:0,thetaSeq:0,adaptiveLog:[],adaptiveSeen:{},learned:{},
     batchCursor:0,batchNo:0,lastResult:null};
 }
 /* 清空数据：两步确认。第一步系统弹窗，第二步要把按钮再按一次，
@@ -1555,7 +1698,7 @@ window.App={
   startPlacement:startPlacement, speak:speak, toggleAccent:toggleAccent, placeAnswer:placeAnswer, answer:answer, checkSpell:checkSpell,
   nextWord:nextWord, undo:undo, markTooEasy:markTooEasy, undoTooEasy:undoTooEasy,
   setWrongRange:setWrongRange, setWrongBrowse:setWrongBrowse, browseMonthShift:browseMonthShift,
-  reviewWrong:reviewWrong, reviewYesterday:reviewYesterday, toggleNote:toggleNote, finishOverview:finishOverview, finishQuiz:finishQuiz,
+  reviewWrong:reviewWrong, reviewYesterday:reviewYesterday, jumpTo:jumpTo, toggleNote:toggleNote, finishOverview:finishOverview, finishQuiz:finishQuiz,
   nextBatch:nextBatch, speakWord:speakWord,
   resetPlacement:resetPlacement, exportData:exportData, importData:importData, clearAll:clearAll,
   openImport:openImport, doPasteImport:doPasteImport, restoreSnapshot:restoreSnapshot,

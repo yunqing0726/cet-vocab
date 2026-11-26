@@ -322,3 +322,15 @@ svg{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.7;st
 /* 「复习昨天错的词」按钮：主按钮上方的次级按钮 */
 #reviewYBtn{display:none;margin-bottom:10px;font-size:14px;letter-spacing:.3px}
 #reviewYBtn .yb-label{vertical-align:middle}
+
+/* 题号条：本轮每道题一个可点圆点 */
+.ans-strip{display:none;flex-wrap:wrap;gap:6px;padding:10px 2px;margin-bottom:12px;
+  border-bottom:1px solid var(--rule)}
+.ans-dot{width:26px;height:26px;border-radius:50%;border:1px solid var(--rule);
+  background:var(--paper-2);color:var(--ink-soft);font-size:11px;line-height:1;
+  display:flex;align-items:center;justify-content:center;transition:.15s;padding:0}
+.ans-dot.ok{background:var(--jade);border-color:var(--jade);color:#fff}
+.ans-dot.bad{background:var(--red);border-color:var(--red);color:#fff}
+.ans-dot.cur{box-shadow:0 0 0 2px var(--paper),0 0 0 4px var(--ink)}
+.ans-dot:active{transform:scale(.92)}
+#changeActions .small-btn{flex:0 0 auto}

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#f6f2e9">
 <title>词频通 · 四六级词汇手册</title>
-<link rel="stylesheet" href="style.css?v=20261127b">
+<link rel="stylesheet" href="style.css?v=20261127j">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 </head>
@@ -134,6 +134,8 @@
       <button class="link-btn" onclick="App.resumeQuiz()">继续当前测验</button>
       <button class="link-btn danger" onclick="App.restartQuiz()">重新开始</button>
     </div>
+    <!-- 题号条：点已答过的题号可以回去修改答案 -->
+    <div class="ans-strip" id="ansStrip"></div>
     <div class="quiz-card" id="quizCard">
       <div class="quiz-hint" id="quizHint">这个词，你认识吗？</div>
       <div class="word-display" id="quizWord">—</div>
@@ -165,6 +167,12 @@
       <button class="btn btn-ghost" id="undoBtn" onclick="App.undo()" style="display:none"><svg class="btn-ic"><use href="#i-undo"/></svg>撤销</button>
       <button class="btn btn-skip" onclick="App.markTooEasy()">太简单</button>
       <button class="btn btn-primary" onclick="App.nextWord()">下一个<svg class="btn-ic"><use href="#i-arrow"/></svg></button>
+    </div>
+    <!-- 回看已答题目：改答 -->
+    <div class="answer-actions" id="changeActions" style="display:none">
+      <button class="btn btn-ghost" onclick="App.answer(false)">改为不认识</button>
+      <button class="btn btn-primary" onclick="App.answer(true)">改为认识</button>
+      <button class="btn btn-ghost small-btn" onclick="App.nextWord()">下一个</button>
     </div>
     <p class="tip" id="quizTip"></p>
   </section>
@@ -306,8 +314,8 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="data.js?v=20261127b"></script>
-<script src="book_data.js?v=20261127b"></script>
-<script src="app.js?v=20261127b"></script>
+<script src="data.js?v=20261127j"></script>
+<script src="book_data.js?v=20261127j"></script>
+<script src="app.js?v=20261127j"></script>
 </body>
 </html>
