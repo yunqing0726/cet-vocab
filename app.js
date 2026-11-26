@@ -536,9 +536,18 @@ function showPlace(){
 }
 
 /* ---------- 测验（可持久化、多阶段） ---------- */
+/* 四六级错题池：不受「跳过简单词」阈值影响，答错过的词永远留在错题本里。
+   只排除太简单和当前所选的四/六级范围。 */
+function cetWrongPool(){
+  return ALL.filter(function(w){
+    if(S.level==='4' && w.l!==4) return false;
+    if(S.level==='6' && w.l!==6) return false;
+    return !S.tooEasy[w.w];
+  });
+}
 function wrongDue(){
   var now=ts();
-  return trainedPool().filter(function(w){
+  return cetWrongPool().filter(function(w){
     var x=S.wrong[w.w]; if(!x) return false;
     var d=(now-(x.last||x.first))/86400000;
     var interval=wrongInterval(x);
@@ -547,7 +556,7 @@ function wrongDue(){
 }
 function wrongSorted(){
   var now=ts();
-  return trainedPool().filter(function(w){ return !!S.wrong[w.w]; }).sort(function(a,b){
+  return cetWrongPool().filter(function(w){ return !!S.wrong[w.w]; }).sort(function(a,b){
     var x=S.wrong[a.w],y=S.wrong[b.w];
     var da=(now-(x.last||x.first))/86400000, db=(now-(y.last||y.first))/86400000;
     var ia=wrongInterval(x), ib=wrongInterval(y);
@@ -780,7 +789,7 @@ function startQuiz(type, opts){
   var queue=[];
   if(opts.queue){ queue=opts.queue.slice(); }
   else if(type==='wrong'){
-    queue=wrongSorted().slice(0,20);
+    queue=pickWrongWords().slice(0,20);
     if(!queue.length){ toast('错题本还是空的，先做几道题吧'); go('wrongbook'); return; }
   }else if(type==='college'){
     // 大学英语：opts.queue 由 startCollege 传入，正常不会走到这里
@@ -1171,10 +1180,13 @@ var wrongBrowse=false;       // false=遗忘曲线排序 true=按日期浏览
 var wrongBook='cet';         // 'cet'=四六级词库 'college'=大学英语词库（两本独立）
 var browseYear=0, browseMonth=0;
 function setWrongBook(b){ wrongBook=b; renderWrong(); }
-/* 按来源取错题词条：四六级走 CET 词池，大学英语走教材词库 */
+/* 按来源取错题词条：四六级走 CET 词库，大学英语走教材词库。
+   注意：这里**不能**用 trainedPool()。trainedPool 会按「跳过简单词」的阈值过滤，
+   一旦重测词汇量把门槛调高，之前答错的简单词就会从错题本里整片消失——错题必须一直留着。
+   只排除「太简单」和当前选的四/六级范围。 */
 function wrongPoolByBook(){
   if(wrongBook==='college') return COLLEGE.slice();
-  return trainedPool();
+  return cetWrongPool();
 }
 function wrongFiltered(){
   var now=ts();
@@ -1222,7 +1234,6 @@ function yesterdayWrongWords(){
   (S.wrongLog||[]).forEach(function(it){
     if(it.date!==y) return;
     var w=COLLEGE_MAP[String(it.w).toLowerCase()] ||
-          trainedPool().filter(function(x){ return x.w===it.w; })[0] ||
           ALL.filter(function(x){ return x.w===it.w; })[0];
     if(!w) return;
     var isCol = !!COLLEGE_MAP[String(it.w).toLowerCase()];
