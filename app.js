@@ -40,6 +40,13 @@ var S = {
   lastResult: null       // 上一套结算
 };
 
+/* 老数据没有 lastWrong 的，用 first（第一次答错时间）补上 */
+function backfillLastWrong(){
+  Object.keys(S.wrong||{}).forEach(function(k){
+    var x=S.wrong[k];
+    if(x && !x.lastWrong) x.lastWrong=x.first||x.last||ts();
+  });
+}
 function load(){
   try{
     var raw = localStorage.getItem(LS);
@@ -71,6 +78,7 @@ function load(){
       }
     }
   }catch(e){}
+  backfillLastWrong();
 }
 function save(){ try{ localStorage.setItem(LS, JSON.stringify(S)); }catch(e){} }
 function today(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -957,8 +965,9 @@ function reveal(known){
     if(allowed){
       x.n++; x.level=w.l; x.college=!!w.isCollege;
       fsrsUpdate(x, false, (ts()-(x.last||x.first))/86400000);
+      x.lastWrong=ts();            // 「错题本-时间筛选」按这个算，与复习时间(last)分开
       S.wrong[w.w]=x;
-      logTsAdded=ts();
+      logTsAdded=x.lastWrong;
       S.wrongLog.push({w:w.w, ts:logTsAdded, date:today(), type:ss.type}); updateStreak();
     } else S.wrong[w.w]=x;
     // 加入本轮不认识列表
@@ -1073,7 +1082,9 @@ function finishQuiz(){
   var type=ss.type;
   // 推进批内游标，下一套从新词开始，不重复刚做完的这批
   S.batchCursor=(S.batchCursor||0)+20;
-  S.lastResult={rate:rate, correct:ss.correct, total:ss.mainWords.length, type:type, no:S.batchNo||1};
+  S.lastResult={rate:rate, correct:ss.correct, total:ss.mainWords.length, type:type, no:S.batchNo||1,
+                fromYesterday:!!ss.fromYesterday,
+                yWords:ss.fromYesterday?ss.mainWords.map(function(w){return w.w;}):null};
   S.session=null; save();
   autoSnapshot();                        // 每做完一套自动存一份本地快照
   toast('第 '+(S.lastResult.no)+' 套完成！正确率 '+rate+'%（'+ss.correct+'/'+ss.mainWords.length+'）');
@@ -1091,10 +1102,27 @@ function showBatchSummary(res){
     '<div class="bs-rate">'+res.rate+'<span>%</span></div>'+
     '<div class="bs-detail">答对 '+res.correct+' / '+res.total+' 个单词</div>'+
     '<div class="bs-actions">'+
-      '<button class="btn btn-primary" onclick="App.nextBatch()">继续下一套<svg class="btn-ic"><use href="#i-arrow"/></svg></button>'+
+      (res.fromYesterday && res.type==='wrong'
+        ? '<button class="btn btn-primary" onclick="App.goWrongNormal()">接着复习常规错题<svg class="btn-ic"><use href="#i-arrow"/></svg></button>'
+        : '<button class="btn btn-primary" onclick="App.nextBatch()">继续下一套<svg class="btn-ic"><use href="#i-arrow"/></svg></button>')+
       '<button class="btn btn-ghost" onclick="App.go(\''+backView+'\')">'+backLabel+'</button>'+
-    '</div>';
+    '</div>'+
+    (res.fromYesterday && res.type==='wrong'
+      ? '<div class="bs-hint">昨天的错词已全部复习完。接下来按你选的词量继续复习其余错题。</div>'
+      : '');
   go('batchdone');
+}
+/* 昨天专项做完 → 接着按当前词量复习常规错题 */
+function goWrongNormal(){
+  // 刚复习过的昨天那批词不再重复考（除非滤完一个不剩）
+  var done={};
+  ((S.lastResult&&S.lastResult.yWords)||[]).forEach(function(w){ done[w]=1; });
+  var list=pickWrongWords().filter(function(w){ return !done[w.w]; });
+  if(!list.length) list=pickWrongWords();
+  S.session=null; S.lastResult=null; save();
+  go('wrongbook'); renderWrong();
+  if(!list.length){ toast('这个时间范围内没有错题'); return; }
+  startQuiz('wrong',{queue:list});
 }
 function nextBatch(){
   var t=(S.lastResult&&S.lastResult.type)||'normal';
@@ -1137,7 +1165,8 @@ function undoTooEasy(word){
 }
 
 /* ---------- 错题本（时间范围筛选 + 按日期浏览） ---------- */
-var wrongRange='all';        // '1'|'3'|'7'|'all'
+var wrongRange='all';        // '1'|'3'|'7'|'all'（按「上次答错时间」筛，不是上次复习时间）
+var wrongSize='20';          // '10'|'20'|'30'|'50'|'all' 一次复习多少个
 var wrongBrowse=false;       // false=遗忘曲线排序 true=按日期浏览
 var wrongBook='cet';         // 'cet'=四六级词库 'college'=大学英语词库（两本独立）
 var browseYear=0, browseMonth=0;
@@ -1156,10 +1185,32 @@ function wrongFiltered(){
     if(wrongBook==='college' ? !isCol : isCol) return false;
     if(wrongRange==='all') return true;
     var days=parseInt(wrongRange,10);
-    return (now-(x.last||x.first))/86400000 <= days;
+    return (now-wrongStamp(x))/86400000 <= days;
   });
 }
 function setWrongRange(r){ wrongRange=String(r); renderWrong(); }
+function setWrongSize(s){ wrongSize=String(s); renderWrong(); }
+/* 错题本的「时间」按「上一次答错的时间」算。
+   老数据没有 lastWrong 字段时退回 first（第一次答错的时间）。 */
+function wrongStamp(x){ return x.lastWrong || x.first || 0; }
+/* 按遗忘曲线优先级排序（逾期最久、错得最多的先考） */
+function wrongUrgency(list){
+  var now=ts();
+  return list.slice().sort(function(a,b){
+    var x=S.wrong[a.w], y=S.wrong[b.w];
+    if(!x||!y) return 0;
+    var da=(now-wrongStamp(x))/86400000, db=(now-wrongStamp(y))/86400000;
+    var ia=wrongInterval(x), ib=wrongInterval(y);
+    return (db-ib)-(da-ia) || ((y.n||0)-(x.n||0));
+  });
+}
+/* 本次要复习的错词：按当前筛选 + 当前词量取，优先级高的在前 */
+function pickWrongWords(){
+  var list=wrongUrgency(wrongFiltered());
+  if(wrongSize==='all') return list;
+  var n=parseInt(wrongSize,10)||20;
+  return list.slice(0,n);
+}
 function setWrongBrowse(v){ wrongBrowse=!!v; renderWrong(); }
 /* 「昨天错的词」：按 wrongLog 里 date === 昨天 的记录取词（两本错题本各自过滤） */
 function yesterdayKey(){
@@ -1185,18 +1236,32 @@ function reviewYesterday(){
   var list=yesterdayWrongWords();
   if(!list.length){ toast('昨天没有答错的单词'); return; }
   startQuiz('wrong',{queue:shuffle(list.slice())});
+  // 标记：这是「昨天专项」，做完后自动提示接常规错题复习
+  if(S.session){ S.session.fromYesterday=true; save(); }
+}
+/* 昨天专项做完后，还剩多少常规错题可复习（用于结算页的提示） */
+function wrongLeftCount(){
+  var done={};
+  (S.session&&S.session.mainWords||[]).forEach(function(w){ done[w.w]=1; });
+  return pickWrongWords().filter(function(w){ return !done[w.w]; }).length;
 }
 function browseMonthShift(n){
   var d=new Date(browseYear,browseMonth+n,1); browseYear=d.getFullYear(); browseMonth=d.getMonth(); renderWrong();
 }
 function renderWrong(){
-  document.querySelectorAll('.range-chip').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-range')===wrongRange); });
+  document.querySelectorAll('.range-chip[data-range]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-range')===wrongRange); });
+  document.querySelectorAll('.range-chip[data-wsize]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-wsize')===wrongSize); });
   document.querySelectorAll('.book-bar .range-chip[data-wb]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-wb')===wrongBook); });
   var browseBtn=document.getElementById('browseBtn'), browseBtn2=document.getElementById('browseBtn2');
   if(browseBtn){ browseBtn.classList.toggle('on',!wrongBrowse); }
   if(browseBtn2){ browseBtn2.classList.toggle('on',wrongBrowse); }
   var list=wrongFiltered();
-  document.getElementById('reviewBtn').style.display=list.length?'block':'none';
+  var rBtn=document.getElementById('reviewBtn');
+  if(rBtn){
+    rBtn.style.display=list.length?'block':'none';
+    var pickN = wrongSize==='all' ? list.length : Math.min(list.length, parseInt(wrongSize,10)||20);
+    rBtn.textContent = list.length ? ('开始强化复习（'+pickN+' 个）') : '开始强化复习';
+  }
   // 「复习昨天的错词」按钮：只有昨天真有错词时才出现
   var yBtn=document.getElementById('reviewYBtn');
   if(yBtn){
@@ -1214,20 +1279,19 @@ function renderWrong(){
   }
   if(wrongBrowse){ renderWrongByDate(); return; }
   var now=ts();
-  box.innerHTML=list.sort(function(a,b){
-    var x=S.wrong[a.w],y=S.wrong[b.w];
-    var da=(now-(x.last||x.first))/86400000, db=(now-(y.last||y.first))/86400000;
-    var ia=wrongInterval(x), ib=wrongInterval(y);
-    return (db-ib)-(da-ia)||(y.n-x.n);
-  }).map(function(w){
+  box.innerHTML=wrongUrgency(list).map(function(w){
     var x=S.wrong[w.w];
+    // 「间隔」从上次复习算（记忆新鲜度），「待复习」判断也用复习时间；
+    // 而顶部的「时间」筛选按答错时间（wrongStamp），两者各管各的
     var days=(now-(x.last||x.first))/86400000;
     var interval=wrongInterval(x);
     var overdue=days>=interval;
     var tag=overdue?'<span class="wrong-priority '+(days>interval*2?'forgot':'recent')+'">'+(days>interval*2?'长期遗忘':'待复习')+'</span>':'';
     var mean=(w.m[0]&&w.m[0].t)||'';
+    var ago=Math.floor((now-wrongStamp(x))/86400000);
+    var agoTxt=ago<=0?'今天错过':(ago+' 天前错过');
     return '<div class="wrong-item"><div><div class="wi-word">'+esc(w.w)+tag+'</div>'+
-      '<div class="wi-meta">'+esc(mean)+' · '+(w.ipa||'')+'</div></div>'+
+      '<div class="wi-meta">'+esc(mean)+' · '+(w.ipa||'')+' · '+agoTxt+'</div></div>'+
       '<div class="wi-count'+(days>interval*2?' long':'')+'">错 '+x.n+' 次</div></div>';
   }).join('');
 }
@@ -1258,9 +1322,9 @@ function renderWrongByDate(){
   box.innerHTML=html;
 }
 function reviewWrong(){
-  var list=wrongFiltered();
+  var list=pickWrongWords();
   if(!list.length){ toast('这个时间范围内没有错题'); return; }
-  startQuiz('wrong',{queue:shuffle(list.slice())});
+  startQuiz('wrong',{queue:list});
 }
 /* ---------- 总览（20 词，注释可点开） ---------- */
 function noteHTML(w){
@@ -1698,7 +1762,7 @@ window.App={
   startPlacement:startPlacement, speak:speak, toggleAccent:toggleAccent, placeAnswer:placeAnswer, answer:answer, checkSpell:checkSpell,
   nextWord:nextWord, undo:undo, markTooEasy:markTooEasy, undoTooEasy:undoTooEasy,
   setWrongRange:setWrongRange, setWrongBrowse:setWrongBrowse, browseMonthShift:browseMonthShift,
-  reviewWrong:reviewWrong, reviewYesterday:reviewYesterday, jumpTo:jumpTo, toggleNote:toggleNote, finishOverview:finishOverview, finishQuiz:finishQuiz,
+  reviewWrong:reviewWrong, reviewYesterday:reviewYesterday, jumpTo:jumpTo, setWrongSize:setWrongSize, goWrongNormal:goWrongNormal, toggleNote:toggleNote, finishOverview:finishOverview, finishQuiz:finishQuiz,
   nextBatch:nextBatch, speakWord:speakWord,
   resetPlacement:resetPlacement, exportData:exportData, importData:importData, clearAll:clearAll,
   openImport:openImport, doPasteImport:doPasteImport, restoreSnapshot:restoreSnapshot,

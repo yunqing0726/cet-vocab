@@ -135,7 +135,9 @@ svg{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.7;st
 .section-title{font-family:var(--serif);font-size:30px;font-weight:600;letter-spacing:1px;margin-top:6px}
 .section-title.small{font-size:19px;margin:28px 0 14px;border-bottom:1px solid var(--rule);padding-bottom:8px}
 .section-sub{font-size:13px;color:var(--ink-soft);margin:6px 0 20px}
-.wrong-list{display:flex;flex-direction:column}
+.wrong-list{display:flex;flex-direction:column;
+  /* 底部有两个固定按钮（昨天专项 + 强化复习），留够空间不让最后一条被挡住 */
+  padding-bottom:calc(170px + env(safe-area-inset-bottom,0px))}
 .wrong-item{background:var(--paper-2);border:1px solid var(--rule);border-bottom:none;padding:15px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .wrong-item:last-child{border-bottom:1px solid var(--rule)}
 .wrong-item .wi-word{font-family:var(--serif);font-size:20px;font-weight:600}
@@ -334,3 +336,6 @@ svg{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.7;st
 .ans-dot.cur{box-shadow:0 0 0 2px var(--paper),0 0 0 4px var(--ink)}
 .ans-dot:active{transform:scale(.92)}
 #changeActions .small-btn{flex:0 0 auto}
+
+/* 结算页提示行 */
+.bs-hint{margin-top:14px;padding:0 6px;font-size:13px;line-height:1.7;color:var(--ink-soft);text-align:center}

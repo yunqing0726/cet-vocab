@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#f6f2e9">
 <title>词频通 · 四六级词汇手册</title>
-<link rel="stylesheet" href="style.css?v=20261127j">
+<link rel="stylesheet" href="style.css?v=20261127m">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 </head>
@@ -230,6 +230,14 @@
       <button class="range-chip" data-range="7" onclick="App.setWrongRange('7')">一周内</button>
       <button class="range-chip on" data-range="all" onclick="App.setWrongRange('all')">全部</button>
     </div>
+    <div class="range-bar">
+      <span class="range-label">数量</span>
+      <button class="range-chip" data-wsize="10" onclick="App.setWrongSize('10')">10 个</button>
+      <button class="range-chip on" data-wsize="20" onclick="App.setWrongSize('20')">20 个</button>
+      <button class="range-chip" data-wsize="30" onclick="App.setWrongSize('30')">30 个</button>
+      <button class="range-chip" data-wsize="50" onclick="App.setWrongSize('50')">50 个</button>
+      <button class="range-chip" data-wsize="all" onclick="App.setWrongSize('all')">全部</button>
+    </div>
     <div class="browse-bar">
       <button class="link-btn on" id="browseBtn" onclick="App.setWrongBrowse(0)">按遗忘曲线</button>
       <button class="link-btn" id="browseBtn2" onclick="App.setWrongBrowse(1)">按日期浏览（哪天错了哪些词）</button>
@@ -314,8 +322,8 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="data.js?v=20261127j"></script>
-<script src="book_data.js?v=20261127j"></script>
-<script src="app.js?v=20261127j"></script>
+<script src="data.js?v=20261127m"></script>
+<script src="book_data.js?v=20261127m"></script>
+<script src="app.js?v=20261127m"></script>
 </body>
 </html>
