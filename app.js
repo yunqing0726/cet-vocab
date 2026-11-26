@@ -288,6 +288,8 @@ function go(v){
   if(v==='settings') renderSettings();
   if(v==='overview') renderOverview();
   if(v==='college') renderCollege();
+  if(v==='search') renderSearch();
+  if(v==='print') renderPrintPicker();
   window.scrollTo(0,0);
 }
 function toast(msg){
@@ -1370,6 +1372,207 @@ function toggleNote(i){
   if(btn) btn.classList.toggle('open',!open);
 }
 
+
+/* ---------- 搜索 ---------- */
+var searchQuery = '';
+var searchResults = [];
+var SEARCH_LIMIT = 60;
+
+function searchWords(q){
+  q = String(q||'').trim().toLowerCase();
+  if(!q) return [];
+  var out = [];
+  var pool = ALL.concat(COLLEGE);
+  for(var i=0;i<pool.length;i++){
+    var w = pool[i];
+    var hit = false;
+    if(w.w.toLowerCase().indexOf(q)>=0) hit = true;
+    else if(w.ipa && w.ipa.toLowerCase().indexOf(q)>=0) hit = true;
+    else {
+      var ms = w.m||[];
+      for(var j=0;j<ms.length;j++){
+        if((ms[j].t||'').indexOf(q)>=0){ hit = true; break; }
+      }
+      if(!hit && w.en && w.en.toLowerCase().indexOf(q)>=0) hit = true;
+    }
+    if(hit) out.push(w);
+    if(out.length>=SEARCH_LIMIT*3) break;
+  }
+  // 排序：词头以 q 开头的优先 → 词头包含 → 释义匹配
+  out.sort(function(a,b){
+    var aw=a.w.toLowerCase(), bw=b.w.toLowerCase();
+    var ar = aw===q?0 : (aw.indexOf(q)===0?1 : (aw.indexOf(q)>=0?2:3));
+    var br = bw===q?0 : (bw.indexOf(q)===0?1 : (bw.indexOf(q)>=0?2:3));
+    if(ar!==br) return ar-br;
+    if(a.w.length!==b.w.length) return a.w.length-b.w.length;
+    return a.w.localeCompare(b.w);
+  });
+  return out.slice(0, SEARCH_LIMIT);
+}
+
+function statusTag(w){
+  if(S.tooEasy[w.w]) return '<span class="st-chip easy">太简单</span>';
+  if(S.wrong[w.w])   return '<span class="st-chip red">错题</span>';
+  if(S.mastered[w.w])return '<span class="st-chip jade">已掌握</span>';
+  return '<span class="st-chip">未学</span>';
+}
+
+function renderSearch(){
+  var input=document.getElementById('searchInput');
+  var box=document.getElementById('searchResults');
+  var hint=document.getElementById('searchHint');
+  if(!box) return;
+  var q=searchQuery;
+  if(!q){
+    box.innerHTML='';
+    if(hint){ hint.style.display='block'; hint.textContent='输入英文或中文，可以搜单词、音标、释义'; }
+    return;
+  }
+  if(hint) hint.style.display='none';
+  var list=searchResults;
+  if(!list.length){
+    box.innerHTML='<div class="empty"><p>没有找到「'+esc(q)+'」</p><p style="font-size:13px;margin-top:6px">换个关键词试试，或者它可能不在当前词库里</p></div>';
+    return;
+  }
+  box.innerHTML='<div class="sr-count">找到 '+list.length+' 条</div>'+list.map(function(w,i){
+    var mean=(w.m||[]).map(function(x){ return (x.p?'<span class="pos">'+esc(x.p)+'.</span>':'')+esc(x.t); }).join('；');
+    var src=w.isCollege?('大学英语 · '+BOOK_NAME[w.book]+' Unit '+w.unit):('四六级 · '+(w.l===4?'四级':'六级'));
+    return '<div class="sr-item">'+
+      '<button class="sr-main" onclick="App.toggleSearchNote('+i+')">'+
+        '<div class="sr-line1"><span class="sr-w" onclick="event.stopPropagation();App.speakWord(\''+esc(w.w).replace(/'/g,"\\'")+'\')" title="点击发音">'+esc(w.w)+'</span>'+
+        '<span class="sr-ipa">'+(w.ipa||'')+'</span>'+statusTag(w)+'</div>'+
+        '<div class="sr-mean">'+(mean||'—')+'</div>'+
+        '<div class="sr-src">'+esc(src)+'</div>'+
+      '</button>'+
+      '<div class="sr-note" id="srnote'+i+'" style="display:none">'+noteHTML(w)+
+        '<button class="btn btn-ghost small-btn" style="margin-top:10px" onclick="App.quizOneWord('+i+')">练这个词</button></div>'+
+    '</div>';
+  }).join('');
+}
+
+function onSearchInput(){
+  var el=document.getElementById('searchInput');
+  searchQuery=el?el.value:'';
+  searchResults=searchWords(searchQuery);
+  renderSearch();
+}
+function clearSearch(){
+  searchQuery=''; searchResults=[];
+  var el=document.getElementById('searchInput'); if(el){ el.value=''; }
+  renderSearch();
+}
+function toggleSearchNote(i){
+  var el=document.getElementById('srnote'+i); if(!el) return;
+  el.style.display = el.style.display!=='none' ? 'none' : 'block';
+}
+function quizOneWord(i){
+  var w=searchResults[i]; if(!w) return;
+  startQuiz(w.isCollege?'college':'normal',{queue:[w]});
+}
+function openSearch(){
+  go('search');
+  setTimeout(function(){ var el=document.getElementById('searchInput'); if(el) el.focus(); },120);
+}
+
+/* ---------- 导出单词书（打印 / 存为 PDF） ---------- */
+var printOpts = { range:'pool', book:'comprehensive', unit:1, withIpa:true, withEn:false, withPh:true, twoCol:true };
+
+function setPrintRange(r){
+  printOpts.range=String(r);
+  renderPrintPicker();
+}
+function setPrintBook(b){
+  printOpts.book=String(b);
+  renderPrintPicker();
+}
+function setPrintUnit(u){
+  printOpts.unit=parseInt(u,10)||1;
+  renderPrintPicker();
+}
+function togglePrintOpt(k){
+  printOpts[k]=!printOpts[k];
+  renderPrintPicker();
+}
+function printPoolWords(){
+  var r=printOpts.range;
+  if(r==='pool')     return trainedPool().slice();
+  if(r==='mastered') return ALL.filter(function(w){ return !!S.mastered[w.w]; });
+  if(r==='wrong')    return cetWrongPool().filter(function(w){ return !!S.wrong[w.w]; });
+  if(r==='tooeasy')  return ALL.filter(function(w){ return !!S.tooEasy[w.w]; });
+  if(r==='college')  return COLLEGE.filter(function(w){ return w.book===printOpts.book && w.unit===printOpts.unit; });
+  if(r==='allcet')   return ALL.slice();
+  return ALL.slice();
+}
+function printBookTitle(){
+  var r=printOpts.range;
+  if(r==='pool')     return '待学词表（按词频）';
+  if(r==='mastered') return '已掌握单词';
+  if(r==='wrong')    return '错题本单词';
+  if(r==='tooeasy')  return '标记太简单的单词';
+  if(r==='college')  return '大学英语 · '+BOOK_NAME[printOpts.book]+' Unit '+printOpts.unit;
+  if(r==='allcet')   return '四六级词库全表';
+  return '单词表';
+}
+function renderPrintPicker(){
+  var box=document.getElementById('printPicker'); if(!box) return;
+  var ranges=[['pool','待学词表'],['mastered','已掌握'],['wrong','错题本'],['tooeasy','太简单'],['college','大学英语单元'],['allcet','四六级全库']];
+  var h='<div class="pp-label">选范围</div><div class="pp-chips">';
+  h+=ranges.map(function(x){
+    return '<button class="pp-chip'+(printOpts.range===x[0]?' on':'')+'" onclick="App.setPrintRange(\''+x[0]+'\')">'+x[1]+'</button>';
+  }).join('');
+  h+='</div>';
+  if(printOpts.range==='college'){
+    h+='<div class="pp-label">选教材</div><div class="pp-chips">';
+    h+='<button class="pp-chip'+(printOpts.book==='comprehensive'?' on':'')+'" onclick="App.setPrintBook(\'comprehensive\')">综合教程</button>';
+    h+='<button class="pp-chip'+(printOpts.book==='viewing'?' on':'')+'" onclick="App.setPrintBook(\'viewing\')">视听说教程</button>';
+    h+='</div><div class="pp-label">选单元</div><div class="pp-chips">';
+    for(var u=1;u<=8;u++){
+      h+='<button class="pp-chip'+(printOpts.unit===u?' on':'')+'" onclick="App.setPrintUnit('+u+')">Unit '+u+'</button>';
+    }
+    h+='</div>';
+  }
+  h+='<div class="pp-label">版式</div><div class="pp-chips">';
+  h+='<button class="pp-chip'+(printOpts.withIpa?' on':'')+'" onclick="App.togglePrintOpt(\'withIpa\')">含音标</button>';
+  h+='<button class="pp-chip'+(printOpts.withEn?' on':'')+'" onclick="App.togglePrintOpt(\'withEn\')">含英文释义</button>';
+  h+='<button class="pp-chip'+(printOpts.withPh?' on':'')+'" onclick="App.togglePrintOpt(\'withPh\')">含短语</button>';
+  h+='<button class="pp-chip'+(printOpts.twoCol?' on':'')+'" onclick="App.togglePrintOpt(\'twoCol\')">双栏</button>';
+  h+='</div>';
+  var n=printPoolWords().length;
+  h+='<div class="pp-count">共 <b>'+n+'</b> 个词</div>';
+  box.innerHTML=h;
+  var btn=document.getElementById('printGoBtn');
+  if(btn) btn.disabled = n===0;
+}
+function doPrint(){
+  var list=printPoolWords();
+  if(!list.length){ toast('这个范围没有单词'); return; }
+  if(list.length>800 && !confirm('这次要导出 '+list.length+' 个词，手机上生成会比较慢（约十几秒）。\n\n建议分批导出，比如只选某个单元或「已掌握」。确定继续吗？')) return;
+  var h='';
+  h+='<div class="pr-head"><div class="pr-title">'+esc(printBookTitle())+'</div>'+
+     '<div class="pr-meta">词频通 · '+esc(today())+' · 共 '+list.length+' 个词</div></div>';
+  h+='<div class="pr-body'+(printOpts.twoCol?' two':'')+'">';
+  list.forEach(function(w,i){
+    var mean=(w.m||[]).map(function(x){ return (x.p?'<i>'+esc(x.p)+'.</i> ':'')+esc(x.t); }).join('；');
+    h+='<div class="pr-item"><span class="pr-n">'+(i+1)+'</span>'+
+       '<span class="pr-w">'+esc(w.w)+'</span>';
+    if(printOpts.withIpa && w.ipa) h+='<span class="pr-ipa">'+esc(w.ipa)+'</span>';
+    h+='<span class="pr-mean">'+mean+'</span>';
+    if(printOpts.withEn && w.en) h+='<span class="pr-en">'+esc(w.en)+'</span>';
+    if(printOpts.withPh && w.ph && w.ph.length){
+      h+='<span class="pr-ph">'+w.ph.slice(0,3).map(function(p){ return esc(p.p)+' '+esc(p.t); }).join('；')+'</span>';
+    }
+    h+='</div>';
+  });
+  h+='</div>';
+  var stage=document.getElementById('printStage');
+  stage.innerHTML=h;
+  document.body.classList.add('printing');
+  setTimeout(function(){
+    window.print();
+    setTimeout(function(){ document.body.classList.remove('printing'); },300);
+  },50);
+}
+
 /* ---------- 看板 ---------- */
 function renderDash(){
   var totalCorrect=0,totalAll=0;
@@ -1777,7 +1980,11 @@ window.App={
   nextBatch:nextBatch, speakWord:speakWord,
   resetPlacement:resetPlacement, exportData:exportData, importData:importData, clearAll:clearAll,
   openImport:openImport, doPasteImport:doPasteImport, restoreSnapshot:restoreSnapshot,
-  importFromClipboard:importFromClipboard, autoSnapshot:autoSnapshot, renderBackupInfo:renderBackupInfo
+  importFromClipboard:importFromClipboard, autoSnapshot:autoSnapshot, renderBackupInfo:renderBackupInfo,
+  openSearch:openSearch, onSearchInput:onSearchInput, clearSearch:clearSearch,
+  toggleSearchNote:toggleSearchNote, quizOneWord:quizOneWord,
+  setPrintRange:setPrintRange, setPrintBook:setPrintBook, setPrintUnit:setPrintUnit,
+  togglePrintOpt:togglePrintOpt, doPrint:doPrint
 };
 if(location.search.indexOf('test=1')>=0){
   window.App._setCurrent=function(w){ S.current=w; };
