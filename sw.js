@@ -2,7 +2,7 @@
    缓存版本升级：改 CACHE 名称即可触发旧缓存清理
    注意：预缓存必须用 cache:'reload' 绕过浏览器 HTTP 缓存，
    否则 GitHub Pages 的 max-age 会让新版本装进旧文件。 */
-var CACHE = 'cet-vocab-v14';
+var CACHE = 'cet-vocab-v15';
 var CORE = [
   './',
   './index.html',

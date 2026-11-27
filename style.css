@@ -396,3 +396,6 @@ svg{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.7;st
   .pr-mean i{color:#555;font-style:italic}
   .pr-en,.pr-ph{display:block;font-size:9pt;color:#555;margin-left:20px;margin-top:1px}
 }
+
+/* 设置项：开关型按钮（自动朗读等） */
+.btn.small-btn.off{color:var(--ink-soft);border-color:var(--rule);background:var(--paper-2)}

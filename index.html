@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#f6f2e9">
 <title>词频通 · 四六级词汇手册</title>
-<link rel="stylesheet" href="style.css?v=20261127u">
+<link rel="stylesheet" href="style.css?v=20261128a">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 </head>
@@ -345,6 +345,10 @@
           <button class="btn btn-primary small-btn" onclick="App.doPasteImport()">导入</button>
         </div>
       </div>
+      <div class="setting-row">
+        <div><div class="setting-name">答完自动朗读</div><div class="setting-desc">揭晓答案时自动读一遍（图书馆可关）</div></div>
+        <button class="btn btn-ghost small-btn" id="autoSpeakBtn" onclick="App.toggleAutoSpeak()">开</button>
+      </div>
       <div class="setting-row danger">
         <div><div class="setting-name">清空全部数据</div><div class="setting-desc">需连续确认两次，不可恢复</div></div>
         <button class="btn btn-danger" id="clearBtn" onclick="App.clearAll()">清空</button>
@@ -364,8 +368,8 @@
 <div id="printStage" class="print-stage"></div>
 <div id="toast" class="toast"></div>
 
-<script src="data.js?v=20261127u"></script>
-<script src="book_data.js?v=20261127u"></script>
-<script src="app.js?v=20261127u"></script>
+<script src="data.js?v=20261128a"></script>
+<script src="book_data.js?v=20261128a"></script>
+<script src="app.js?v=20261128a"></script>
 </body>
 </html>

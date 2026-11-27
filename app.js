@@ -19,6 +19,7 @@ var S = {
   daily: {},             // 'YYYY-MM-DD' -> {new, correct, total}
   streak: 0,
   accent: 2,             // 2=美式 1=英式
+  autoSpeak: true,       // 揭晓答案时自动朗读（图书馆可关）
   lastActive: '',
   session: null,         // 当前测验（持久化，切页/刷新不变）
   current: null,
@@ -124,6 +125,7 @@ var COLLEGE = (function(){
       unit: x.u,
       unitTitle: x.t,
       page: x.g,
+      alias: x.a || '',   /* 发音别名：多词短语有道取不到音频时用（如 base jump → base jumping） */
       isCollege: true
     };
   });
@@ -300,8 +302,17 @@ function toast(msg){
 /* ---------- 发音 ---------- */
 var audioCache={};
 var currentAudio=null;
+/* 有些多词短语有道接口取不到音频（HTTP 500），教材词库里带了别名（如 base jump → base jumping）。
+   这里统一把「要显示的词」翻成「要请求音频的词」。 */
+function audioName(word){
+  if(!word) return word;
+  var k=String(word).toLowerCase();
+  var col=COLLEGE_MAP[k];
+  if(col && col.alias) return col.alias;
+  return word;
+}
 function audioUrl(word){
-  return 'https://dict.youdao.com/dictvoice?audio='+encodeURIComponent(word)+'&type='+(S.accent==1?1:2);
+  return 'https://dict.youdao.com/dictvoice?audio='+encodeURIComponent(audioName(word))+'&type='+(S.accent==1?1:2);
 }
 function getAudio(word){
   var key=(S.accent==1?1:2)+'|'+word.toLowerCase();
@@ -354,6 +365,15 @@ function updateAccentUI(){
     var b=document.getElementById(id);
     if(b){ b.textContent=t; b.classList.toggle('uk',S.accent==1); }
   });
+}
+/* 自动朗读开关：默认开；关掉后揭晓答案不出声（图书馆/宿舍用） */
+function toggleAutoSpeak(){
+  S.autoSpeak=!S.autoSpeak; save(); updateAutoSpeakUI();
+  toast(S.autoSpeak?'已开启：答完自动朗读':'已关闭：答完不再自动朗读');
+}
+function updateAutoSpeakUI(){
+  var b=document.getElementById('autoSpeakBtn');
+  if(b){ b.textContent=S.autoSpeak?'开':'关'; b.classList.toggle('off',!S.autoSpeak); }
 }
 
 /* ---------- 单词不换行 + 自适应字号 ---------- */
@@ -1011,6 +1031,14 @@ function reveal(known){
   save();
   renderReveal(w, known);
   renderAnsStrip();
+  /* 揭晓答案时朗读一遍（用户 2026-11-27 要求）。
+     只在这里读，jumpTo 回看旧题不会走 reveal()，所以不会重复读。
+     S.autoSpeak 关掉后不出声（设置页可关，图书馆场景用）。 */
+  if(S.autoSpeak!==false){
+    setTimeout(function(){
+      if(S.current && S.current.w===w.w) speak(true);
+    },150);
+  }
 }
 /* 只负责把答案区渲染出来（不写状态），reveal 和「回看已答题目」共用 */
 function renderReveal(w, known){
@@ -1041,6 +1069,8 @@ function renderReveal(w, known){
   document.getElementById('changeActions').style.display='none';
   document.getElementById('undoBtn').style.display='inline-flex';
   document.getElementById('quizTip').textContent=known?'✅ 回答正确':'❌ 已收入错题本，将按遗忘曲线安排复习';
+  /* 注意：朗读不放这里。回看旧题时 jumpTo 会同时调 showQuiz（有 autoSpeak）和 renderReveal，
+     放这里会连读两遍。朗读统一在 reveal() 末尾做一次。 */
 }
 /* 题号条：本轮每道题一个圆点。绿=认识，红=不认识，当前题描边。点已答过的可以回去改答。 */
 function renderAnsStrip(){
@@ -1935,7 +1965,7 @@ function doPasteImport(){
 function blankState(){
   return {level:'both',placementDone:false,skipThreshold:0,vocabSize:0,
     mastered:{},tooEasy:{},tooEasyLog:[],wrong:{},wrongLog:[],daily:{},streak:0,
-    accent:2,lastActive:'',session:null,current:null,
+    accent:2,autoSpeak:true,lastActive:'',session:null,current:null,
     placePool:[],placeAsked:{},placeIdx:0,placeCorrect:0,placeAnswers:[],
     theta:0,thetaN:0,thetaSeq:0,adaptiveLog:[],adaptiveSeen:{},learned:{},
     batchCursor:0,batchNo:0,lastResult:null};
@@ -1973,7 +2003,7 @@ if(location.search.indexOf('test=1')>=0){ window.confirm=function(){return true;
 window.App={
   go:go, setLevel:setLevel, startQuiz:startQuiz, resumeQuiz:resumeQuiz, restartQuiz:restartQuiz,
   startCollege:startCollege, setBook:setBook, setWrongBook:setWrongBook,
-  startPlacement:startPlacement, speak:speak, toggleAccent:toggleAccent, placeAnswer:placeAnswer, answer:answer, checkSpell:checkSpell,
+  startPlacement:startPlacement, speak:speak, toggleAccent:toggleAccent, toggleAutoSpeak:toggleAutoSpeak, placeAnswer:placeAnswer, answer:answer, checkSpell:checkSpell,
   nextWord:nextWord, undo:undo, markTooEasy:markTooEasy, undoTooEasy:undoTooEasy,
   setWrongRange:setWrongRange, setWrongBrowse:setWrongBrowse, browseMonthShift:browseMonthShift,
   reviewWrong:reviewWrong, reviewYesterday:reviewYesterday, jumpTo:jumpTo, setWrongSize:setWrongSize, goWrongNormal:goWrongNormal, toggleNote:toggleNote, finishOverview:finishOverview, finishQuiz:finishQuiz,
@@ -1990,6 +2020,7 @@ if(location.search.indexOf('test=1')>=0){
   window.App._setCurrent=function(w){ S.current=w; };
   window.App._audioSrc=function(){ return currentAudio?currentAudio.src:''; };
   window.App._state=function(){ return JSON.parse(JSON.stringify(S)); };
+  window.App._audioUrl=function(w){ return audioUrl(w); };
 }
 
 var booted=false;
@@ -2002,6 +2033,7 @@ function boot(){
     return;
   }
   updateAccentUI();
+  updateAutoSpeakUI();
   // 恢复未完成的测验（切页/刷新后不变）
   if(S.session && S.session.queue && S.session.queue.length && S.session.type!=='placement'){
     go(S.session.mode==='overview'?'overview':'quiz');
