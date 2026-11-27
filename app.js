@@ -335,7 +335,10 @@ function speak(silent){
     if(p && p.catch){ p.catch(function(){ if(!silent) toast('音频加载中，请再点一次'); }); }
   }catch(e){ if(!silent) toast('发音失败，请检查网络'); }
 }
-function autoSpeak(w){
+function autoSpeak(w, force){
+  /* S.autoSpeak 关掉后，题目出现和揭晓答案都不出声（图书馆/宿舍场景）。
+     用户主动点「切换英美音」时传 force=true，那是他自己要听，照读。 */
+  if(!force && S.autoSpeak===false) return;
   setTimeout(function(){
     if(S.current && S.current.w===w.w) speak(true);
   }, 180);
@@ -357,7 +360,7 @@ function toggleAccent(){
   S.accent=S.accent==1?2:1; save();
   preloadAudio(S.current); updateAccentUI();
   toast(S.accent==1?'已切换英式发音':'已切换美式发音');
-  if(S.current) autoSpeak(S.current);
+  if(S.current) autoSpeak(S.current, true);   /* 主动切音，无论开关都要试听 */
 }
 function updateAccentUI(){
   var t=S.accent==1?'英':'美';
