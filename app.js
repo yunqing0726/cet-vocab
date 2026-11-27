@@ -13,7 +13,8 @@ var S = {
   vocabSize: 0,          // 入学测试估算的词汇量（词频排名近似）
   mastered: {},          // word -> {n}
   tooEasy: {},           // word -> ts（加入时间）
-  tooEasyLog: [],        // [{w, ts}] 按时间，最新在后  wrong: {},             // word -> {n, rep, last, first, level}
+  tooEasyLog: [],        // [{w, ts}] 按时间，最新在后
+  wrong: {},             // word -> {n, rep, last, first, level}
   wrongLog: [],          // [{w, ts, date, type}] 每次答错记录，用于按日期浏览
   daily: {},             // 'YYYY-MM-DD' -> {new, correct, total}
   streak: 0,
