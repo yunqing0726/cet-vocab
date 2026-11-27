@@ -13,8 +13,7 @@ var S = {
   vocabSize: 0,          // 入学测试估算的词汇量（词频排名近似）
   mastered: {},          // word -> {n}
   tooEasy: {},           // word -> ts（加入时间）
-  tooEasyLog: [],        // [{w, ts}] 按时间，最新在后
-  wrong: {},             // word -> {n, rep, last, first, level}
+  tooEasyLog: [],        // [{w, ts}] 按时间，最新在后  wrong: {},             // word -> {n, rep, last, first, level}
   wrongLog: [],          // [{w, ts, date, type}] 每次答错记录，用于按日期浏览
   daily: {},             // 'YYYY-MM-DD' -> {new, correct, total}
   streak: 0,
@@ -38,7 +37,9 @@ var S = {
   learned: {},           // word -> {n, ok, first, last} 永久学习账本（每题都记）
   batchCursor: 0,        // 顺序选题游标（拼写测验用）
   batchNo: 0,            // 第几套
-  lastResult: null       // 上一套结算
+  lastResult: null,      // 上一套结算
+  trans: {wrong:{}, learned:{}},   // 翻译词块的独立记忆记录（与两本错题本分开）
+  essayFav: {}           // 收藏的作文 id
 };
 
 /* 老数据没有 lastWrong 的，用 first（第一次答错时间）补上 */
@@ -292,6 +293,8 @@ function go(v){
   if(v==='college') renderCollege();
   if(v==='search') renderSearch();
   if(v==='print') renderPrintPicker();
+  if(v==='trans'){ setTTab(ttTab); }
+  if(v==='transquiz') showTrans();
   window.scrollTo(0,0);
 }
 function toast(msg){
@@ -414,6 +417,7 @@ function renderHome(){
     COLLEGE.forEach(function(x){ if(S.mastered[x.w]) colDone++; });
     colStat.textContent = COLLEGE.length ? ('已背 '+colDone+'/'+COLLEGE.length) : '教材单元';
   }
+  renderTransMenuStat();
   // 自适应预测卡片：显示模型认为的「重点但可能不会」的词
   var predBox=document.getElementById('predictBox');
   if(predBox){
@@ -803,6 +807,231 @@ function pickBatch(type, size){
   });
   return shuffle(picked.slice(0,size)).sort(function(a,b){ return (a.f||99999)-(b.f||99999); });
 }
+/* ==================================================================
+   翻译词汇速记 + 作文范文（用户 2026-11-28 需求）
+   设计取舍：翻译和作文都没有「对/错」的客观判定，所以不做成测验收题；
+   翻译词块走「中文→英文」卡片翻转 + 会/不会，错词进独立错题本（复用 FSRS）；
+   作文走阅读器（逐段中英对照 + 收藏好句）。
+   ================================================================== */
+var TRANS = (window.TRANS_DATA && window.TRANS_DATA.items) || [];
+var TRANS_CATS = (window.TRANS_DATA && window.TRANS_DATA.cats) || [];
+var ESSAYS = (window.ESSAY_DATA && window.ESSAY_DATA.essays) || [];
+var transCat = 'all';          // 'all' 或某个分类
+var ttTab = 'trans';           // 二级页当前 tab：trans | essay
+var tq = null;                 // 当前翻译速记会话（不持久化，退出即丢）
+
+function transStat(){
+  var p=S.trans || (S.trans={wrong:{},learned:{}});
+  return {wrongN:Object.keys(p.wrong||{}).length, doneN:Object.keys(p.learned||{}).length};
+}
+function renderTransMenuStat(){
+  var el=document.getElementById('transMenuStat');
+  if(!el) return;
+  var s=transStat();
+  el.textContent=TRANS.length+' 条 · 作文 '+ESSAYS.length+' 篇';
+}
+function setTransCat(c){
+  transCat=c;
+  document.querySelectorAll('#transCats .trans-cat').forEach(function(b){
+    b.classList.toggle('on', b.getAttribute('data-cat')===c);
+  });
+  renderTransHome();
+}
+function renderTransHome(){
+  var cats=document.getElementById('transCats');
+  if(cats){
+    var total=TRANS.length;
+    var html='<button class="trans-cat'+(transCat==='all'?' on':'')+'" data-cat="all" onclick="App.setTransCat(\'all\')">全部<span>'+total+'</span></button>';
+    TRANS_CATS.forEach(function(c){
+      var n=TRANS.filter(function(t){ return t.cat===c; }).length;
+      html+='<button class="trans-cat'+(transCat===c?' on':'')+'" data-cat="'+esc(c)+'" onclick="App.setTransCat(\''+esc(c)+'\')">'+esc(c.replace('类',''))+'<span>'+n+'</span></button>';
+    });
+    cats.innerHTML=html;
+  }
+  var p=S.trans||(S.trans={wrong:{},learned:{}});
+  var pool=transPool();
+  var wrongN=Object.keys(p.wrong||{}).length;
+  var doneN=pool.filter(function(t){ return (p.learned||{})[t.cn]; }).length;
+  var st=document.getElementById('transStat');
+  if(st) st.innerHTML='<b>'+pool.length+'</b> 条 · 已学 '+doneN+' · 错题 '+wrongN;
+  // 「复习翻译错题」按钮：只有错题本非空才出现
+  var btn=document.getElementById('transWrongBtn');
+  if(btn){
+    var wn=transWrongList().length;
+    btn.style.display=wn?'block':'none';
+    var lb=btn.querySelector('.tw-label');
+    if(lb) lb.textContent='复习翻译错题（'+wn+'）';
+  }
+}
+/* 当前分类下的词块池 */
+function transPool(){
+  if(transCat==='all') return TRANS.slice();
+  return TRANS.filter(function(t){ return t.cat===transCat; });
+}
+/* 翻译独立的 FSRS 记录（和四六级、教材两本错题本分开存） */
+function transRec(cn){ var p=S.trans||(S.trans={wrong:{},learned:{}}); return p.wrong[cn]; }
+function transWrongList(){
+  var p=S.trans||{}; var w=p.wrong||{};
+  return Object.keys(w).map(function(cn){
+    var it=TRANS.filter(function(t){ return t.cn===cn; })[0];
+    return it?{it:it, rec:w[cn]}:null;
+  }).filter(Boolean);
+}
+function transDueList(){
+  var now=ts();
+  return transWrongList().filter(function(x){
+    var d=(now-(x.rec.last||x.rec.first))/86400000;
+    return d>=wrongInterval(x.rec);
+  });
+}
+function startTrans(){
+  var pool=transPool();
+  if(!pool.length){ toast('这一类还没有词块'); return; }
+  // 优先到期错词，再补没学过的，最后补学过的
+  var p=S.trans||(S.trans={wrong:{},learned:{}});
+  var due=transDueList().filter(function(x){ return transCat==='all'||x.it.cat===transCat; }).map(function(x){ return x.it; });
+  var fresh=shuffle(pool.filter(function(t){ return !(p.learned||{})[t.cn] && due.indexOf(t)<0; }).slice());
+  var rest=shuffle(pool.filter(function(t){ return (p.learned||{})[t.cn] && due.indexOf(t)<0; }).slice());
+  var list=due.concat(fresh, rest).slice(0,20);
+  tq={queue:list, idx:0, revealed:false, correct:0, log:[]};
+  save(); go('transquiz'); showTrans();
+}
+function showTrans(){
+  if(!tq || !tq.queue.length){ go('trans'); return; }
+  var it=tq.queue[tq.idx];
+  document.getElementById('tqTag').textContent=it.cat.replace('类','');
+  document.getElementById('tqProgress').textContent=(tq.idx+1)+' / '+tq.queue.length;
+  document.getElementById('tqCn').textContent=it.cn;
+  var rev=document.getElementById('tqReveal');
+  var en=document.getElementById('tqEn');
+  if(tq.revealed){ rev.style.display='block'; en.textContent=it.en; }
+  else { rev.style.display='none'; en.textContent=''; }
+  document.getElementById('tqAskActions').style.display=tq.revealed?'none':'flex';
+  document.getElementById('tqNextActions').style.display=tq.revealed?'flex':'none';
+  var last=tq.idx>=tq.queue.length-1;
+  document.querySelector('#tqNextActions .btn-primary').innerHTML=last?'完成<svg class="btn-ic"><use href="#i-arrow"/></svg>':'下一个<svg class="btn-ic"><use href="#i-arrow"/></svg>';
+  var prev=document.querySelector('#tqNextActions .btn-ghost');
+  if(prev) prev.style.display=tq.idx>0?'inline-flex':'none';
+}
+function transAnswer(known){
+  if(!tq || tq.revealed) return;
+  var it=tq.queue[tq.idx];
+  var p=S.trans||(S.trans={wrong:{},learned:{}});
+  p.wrong=p.wrong||{}; p.learned=p.learned||{};
+  p.learned[it.cn]={n:((p.learned[it.cn]||{}).n||0)+1, ok:((p.learned[it.cn]||{}).ok||0)+(known?1:0), last:ts()};
+  if(!known){
+    var x=p.wrong[it.cn]||{n:0,rep:0,first:ts(),S:0.5,D:5};
+    x.n++; fsrsUpdate(x, false, (ts()-(x.last||x.first))/86400000); x.lastWrong=ts();
+    p.wrong[it.cn]=x;
+  }else if(p.wrong[it.cn]){
+    var wx=p.wrong[it.cn]; wx.rep=(wx.rep||0)+1;
+    fsrsUpdate(wx, true, (ts()-(wx.last||wx.first))/86400000);
+  }
+  if(known) tq.correct++;
+  tq.revealed=true; tq.log.push({cn:it.cn, known:!!known});
+  save(); showTrans();
+}
+function transNext(){
+  if(!tq) return;
+  if(tq.idx>=tq.queue.length-1){ tq.done=true; var c=tq.correct, n=tq.queue.length; tq=null; save(); toast('这一组完成：会 '+c+' / '+n); go('trans'); renderTransHome(); return; }
+  tq.idx++; tq.revealed=false; showTrans();
+}
+function transPrev(){
+  if(!tq || tq.idx<=0) return;
+  tq.idx--; tq.revealed=true; showTrans();
+}
+function reviewTransWrong(){
+  var list=transDueList();
+  if(!list.length) list=transWrongList();
+  if(!list.length){ toast('翻译错题本还是空的'); return; }
+  tq={queue:list.slice(0,20).map(function(x){ return x.it; }), idx:0, revealed:false, correct:0, log:[], review:true};
+  go('transquiz'); showTrans();
+}
+/* ---------------- 作文阅读器 ---------------- */
+var essayId = 1;
+var essayZhOn = true;
+var essayScale = 1;
+/* 收藏列表存在 S.essayFav；这里每次现取，避免脚本加载早于 load() 拿到空对象 */
+function favObj(){ if(!S.essayFav || typeof S.essayFav!=='object') S.essayFav={}; return S.essayFav; }
+function renderEssayList(){
+  var box=document.getElementById('essayList'); if(!box) return;
+  var fav=favObj();
+  box.innerHTML=ESSAYS.map(function(e){
+    var lock=fav[e.id]?' on':'';
+    return '<button class="essay-row" onclick="App.openEssay('+e.id+')">'+
+      '<span class="essay-no">'+e.id+'</span>'+
+      '<span class="essay-main"><span class="essay-t">'+esc(e.title)+'</span>'+
+      '<span class="essay-en">'+esc(e.titleEn)+'</span></span>'+
+      '<span class="essay-tag">'+esc(e.tag)+'</span>'+
+      '<span class="essay-words">'+e.words+' 词</span>'+
+      '<span class="essay-star'+lock+'">★</span></button>';
+  }).join('');
+  renderFavBox();
+}
+function renderFavBox(){
+  var box=document.getElementById('favBox'); if(!box) return;
+  var fav=favObj();
+  var n=Object.keys(fav).length;
+  if(!n){ box.innerHTML=''; return; }
+  box.innerHTML='<div class="fav-title">收藏 '+n+' 篇</div>'+
+    ESSAYS.filter(function(e){ return fav[e.id]; }).map(function(e){
+      return '<button class="link-btn" onclick="App.openEssay('+e.id+')">'+esc(e.title)+'</button>';
+    }).join('');
+}
+function openEssay(id){
+  essayId=id;
+  var e=ESSAYS.filter(function(x){ return x.id===id; })[0];
+  if(!e) return;
+  document.getElementById('essayHead').textContent=e.title;
+  var fav=favObj();
+  document.getElementById('essayMeta').innerHTML=
+    '<span class="em-tag">'+esc(e.tag)+'</span><span class="em-en">'+esc(e.titleEn)+'</span>'+
+    '<span class="em-words">'+e.words+' 词 · '+e.paras.length+' 段</span>'+
+    '<button class="em-fav'+(fav[e.id]?' on':'')+'" onclick="App.toggleFav('+e.id+')">'+(fav[e.id]?'★ 已收藏':'☆ 收藏')+'</button>';
+  var zt=document.getElementById('zhToggle');
+  if(zt) zt.textContent=essayZhOn?'隐藏中文':'显示中文';
+  renderEssayBody();
+  go('essay');
+}
+function renderEssayBody(){
+  var e=ESSAYS.filter(function(x){ return x.id===essayId; })[0]; if(!e) return;
+  var body=document.getElementById('essayBody');
+  body.style.fontSize=(16*essayScale)+'px';
+  body.innerHTML=e.paras.map(function(p,i){
+    var zh=(e.zh&&e.zh[i])?'<div class="ep-zh"'+(essayZhOn?'':' style="display:none"')+'>'+esc(e.zh[i])+'</div>':'';
+    return '<div class="ep"><div class="ep-en">'+esc(p)+'</div>'+zh+'</div>';
+  }).join('');
+}
+function toggleEssayZh(){
+  essayZhOn=!essayZhOn;
+  document.getElementById('zhToggle').textContent=essayZhOn?'隐藏中文':'显示中文';
+  document.querySelectorAll('#essayBody .ep-zh').forEach(function(el){ el.style.display=essayZhOn?'block':'none'; });
+}
+function essayFont(d){
+  essayScale=Math.max(0.8, Math.min(1.6, essayScale+d*0.1));
+  renderEssayBody();
+}
+function toggleFav(id){
+  var fav=favObj();
+  if(fav[id]) delete fav[id]; else fav[id]=1;
+  save();
+  renderEssayBody(); renderFavBox();
+  // 刷新收藏按钮和列表星标
+  var e=ESSAYS.filter(function(x){ return x.id===id; })[0];
+  var btn=document.querySelector('#essayMeta .em-fav');
+  if(btn){ btn.classList.toggle('on', !!fav[id]); btn.textContent=fav[id]?'★ 已收藏':'☆ 收藏'; }
+  var rows=document.querySelectorAll('#essayList .essay-row');
+  if(rows[id-1]){ var st=rows[id-1].querySelector('.essay-star'); if(st) st.classList.toggle('on', !!fav[id]); }
+  toast(fav[id]?'已收藏这篇作文':'已取消收藏');
+}
+function setTTab(t){
+  ttTab=t;
+  document.querySelectorAll('.tt-tab').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-tt')===t); });
+  document.getElementById('ttTrans').style.display=(t==='trans')?'block':'none';
+  document.getElementById('ttEssay').style.display=(t==='essay')?'block':'none';
+  if(t==='trans') renderTransHome(); else renderEssayList();
+}
+
 function startQuiz(type, opts){
   opts=opts||{};
   // 已有同一类型的未完成测验 → 恢复，不重建（切页/刷新后测验不变）
@@ -1986,7 +2215,8 @@ function blankState(){
     accent:2,autoSpeak:true,lastActive:'',session:null,current:null,
     placePool:[],placeAsked:{},placeIdx:0,placeCorrect:0,placeAnswers:[],
     theta:0,thetaN:0,thetaSeq:0,adaptiveLog:[],adaptiveSeen:{},learned:{},
-    batchCursor:0,batchNo:0,lastResult:null};
+    batchCursor:0,batchNo:0,lastResult:null,
+    trans:{wrong:{},learned:{}}, essayFav:{}};
 }
 /* 清空数据：两步确认。第一步系统弹窗，第二步要把按钮再按一次，
    这样误触/连点都不会直接清空（连点两次同位置的间隔太短，会被冷却挡住）。 */
@@ -2032,7 +2262,10 @@ window.App={
   openSearch:openSearch, onSearchInput:onSearchInput, clearSearch:clearSearch,
   toggleSearchNote:toggleSearchNote, quizOneWord:quizOneWord,
   setPrintRange:setPrintRange, setPrintBook:setPrintBook, setPrintUnit:setPrintUnit,
-  togglePrintOpt:togglePrintOpt, doPrint:doPrint
+  togglePrintOpt:togglePrintOpt, doPrint:doPrint,
+  setTTab:setTTab, setTransCat:setTransCat, startTrans:startTrans, transAnswer:transAnswer,
+  transNext:transNext, transPrev:transPrev, reviewTransWrong:reviewTransWrong,
+  openEssay:openEssay, toggleEssayZh:toggleEssayZh, essayFont:essayFont, toggleFav:toggleFav
 };
 if(location.search.indexOf('test=1')>=0){
   window.App._setCurrent=function(w){ S.current=w; };

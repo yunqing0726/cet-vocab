@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#f6f2e9">
 <title>词频通 · 四六级词汇手册</title>
-<link rel="stylesheet" href="style.css?v=20261128e">
+<link rel="stylesheet" href="style.css?v=20261128f">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 </head>
@@ -25,6 +25,8 @@
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></symbol>
   <symbol id="i-printer" viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></symbol>
+  <symbol id="i-trans" viewBox="0 0 24 24"><path d="M3 5h9M7.5 3v2c0 4-2 7-4.5 8.5"/><path d="M4.5 9c1 2.2 2.8 3.8 5 4.5"/><path d="M12.5 21l4-11 4 11"/><path d="M14 17.5h5"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.6l2.6 5.5 6 .8-4.4 4.2 1.1 6-5.3-2.9-5.3 2.9 1.1-6L3.4 9.9l6-.8z"/></symbol>
 </svg>
 
 <div id="app">
@@ -72,6 +74,11 @@
         <span class="menu-ic"><svg><use href="#i-book"/></svg></span>
         <span class="menu-name">大学英语</span>
         <span class="menu-desc" id="collegeStat">教材单元</span>
+      </button>
+      <button class="menu-card" onclick="App.go('trans')">
+        <span class="menu-ic"><svg><use href="#i-trans"/></svg></span>
+        <span class="menu-name">翻译 · 作文</span>
+        <span class="menu-desc" id="transMenuStat">速记 + 范文</span>
       </button>
       <button class="menu-card" onclick="App.startQuiz('spell')">
         <span class="menu-ic"><svg><use href="#i-pen"/></svg></span>
@@ -275,6 +282,78 @@
     <div id="dashCalendar" class="calendar"></div>
   </section>
 
+  <!-- 翻译 · 作文 -->
+  <section id="view-trans" class="view">
+    <div class="sec-head">
+      <h2 class="sec-title">翻译 · 作文</h2>
+      <button class="link-btn" onclick="App.go('home')">返回</button>
+    </div>
+    <div class="tt-tabs">
+      <button class="tt-tab on" data-tt="trans" onclick="App.setTTab('trans')">翻译词汇速记</button>
+      <button class="tt-tab" data-tt="essay" onclick="App.setTTab('essay')">作文范文</button>
+    </div>
+
+    <div id="ttTrans">
+      <p class="section-sub">四六级翻译常考词块，按话题分类。看中文想英文，想不起来点「不会」，按遗忘曲线再见面。</p>
+      <div id="transCats" class="trans-cats"></div>
+      <div id="transStat" class="trans-stat"></div>
+      <div class="fixed-bottom">
+        <button class="btn btn-ghost wide yb-btn" onclick="App.reviewTransWrong()" id="transWrongBtn">
+          <svg class="btn-ic"><use href="#i-undo"/></svg><span class="tw-label">复习翻译错题</span>
+        </button>
+        <button class="btn btn-primary wide" onclick="App.startTrans()" id="transStartBtn">开始速记</button>
+      </div>
+    </div>
+
+    <div id="ttEssay" style="display:none">
+      <p class="section-sub">20 篇四六级热点预测范文，可逐段中英对照、收藏好句。</p>
+      <div id="essayList" class="essay-list"></div>
+      <div id="favBox" class="fav-box"></div>
+    </div>
+  </section>
+
+  <!-- 翻译速记（卡片） -->
+  <section id="view-transquiz" class="view">
+    <div class="step-head">
+      <span class="step-tag" id="tqTag">翻译速记</span>
+      <span class="step-progress" id="tqProgress"></span>
+    </div>
+    <div class="quiz-card">
+      <div class="quiz-hint" id="tqHint">这个意思，英文怎么说？</div>
+      <div class="tq-cn" id="tqCn">—</div>
+      <div class="answer-reveal" id="tqReveal" style="display:none">
+        <div class="divider"></div>
+        <div class="tq-en" id="tqEn"></div>
+      </div>
+    </div>
+    <div class="answer-actions" id="tqAskActions">
+      <button class="btn btn-ghost" onclick="App.transAnswer(false)">不会</button>
+      <button class="btn btn-primary" onclick="App.transAnswer(true)">会</button>
+    </div>
+    <div class="answer-actions" id="tqNextActions" style="display:none">
+      <button class="btn btn-ghost" onclick="App.transPrev()">上一个</button>
+      <button class="btn btn-primary" onclick="App.transNext()">下一个<svg class="btn-ic"><use href="#i-arrow"/></svg></button>
+    </div>
+    <p class="tip" id="tqTip">想不起来就点「不会」，收进翻译错题本。</p>
+  </section>
+
+  <!-- 作文阅读器 -->
+  <section id="view-essay" class="view">
+    <div class="sec-head">
+      <h2 class="sec-title" id="essayHead">作文</h2>
+      <button class="link-btn" onclick="App.go('trans');App.setTTab('essay')">返回</button>
+    </div>
+    <div class="essay-meta" id="essayMeta"></div>
+    <div class="essay-tools">
+      <button class="link-btn" onclick="App.toggleEssayZh()" id="zhToggle">显示中文</button>
+      <span class="essay-tool-group">
+        <button class="link-btn" onclick="App.essayFont(-1)">A-</button>
+        <button class="link-btn" onclick="App.essayFont(1)">A+</button>
+      </span>
+    </div>
+    <div id="essayBody" class="essay-body"></div>
+  </section>
+
   <!-- 设置 -->
   <!-- 搜索 -->
   <section id="view-search" class="view">
@@ -369,8 +448,10 @@
 <div id="printStage" class="print-stage"></div>
 <div id="toast" class="toast"></div>
 
-<script src="data.js?v=20261128e"></script>
-<script src="book_data.js?v=20261128e"></script>
-<script src="app.js?v=20261128e"></script>
+<script src="data.js?v=20261128f"></script>
+<script src="book_data.js?v=20261128f"></script>
+<script src="trans_data.js?v=20261128f"></script>
+<script src="essay_data.js?v=20261128f"></script>
+<script src="app.js?v=20261128f"></script>
 </body>
 </html>
