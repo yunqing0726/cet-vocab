@@ -1059,12 +1059,27 @@ function renderReveal(w, known){
   else if(w.ex){ parts.push('例：'+w.ex); }
   ex.textContent=parts.length?parts.join('\n'):'提示：'+w.w+' 的常见搭配请结合释义记忆';
   ex.style.display='block';
+  // 常用搭配（词典给的 idiomatic，只有原数据没短语时才用）
+  var cp=document.getElementById('answerColloc');
+  if(cp){
+    if(w.co && w.co.length && !(w.ph && w.ph.length)){
+      cp.innerHTML='<div class="phrase-title">常用搭配</div>'+w.co.slice(0,3).map(function(c){
+        return '<div class="phrase-item"><b>'+esc(c.p)+'</b><span>'+esc(c.t||'')+'</span></div>';
+      }).join(''); cp.style.display='block';
+    }else cp.style.display='none';
+  }
   var fb=document.getElementById('answerFreq');
   if(w.isCollege){
     var markTxt={'*':'提高目标','★':'提高目标','▲':'发展目标','Ⓐ':'学术词汇 AWL'}[w.mark]||'';
     fb.textContent='大学英语 · '+BOOK_NAME[w.book]+' Unit '+w.unit+(markTxt?' · '+markTxt:'');
   }else{
-    fb.textContent=w.f>0&&w.f<90000?('词频排名 #'+w.f+' · '+(w.l===4?'四级':'六级')+'词'):((w.l===4?'四级':'六级')+'词汇');
+    // 四六级词：优先显示有道统计的真题考频（cf），没有就退回词表词频排名
+    var bits=[];
+    if(w.cf) bits.push('真题出现 '+w.cf+' 次');
+    if(w.cx && w.cx.length) bits.push('常考题型：'+w.cx.join('/'));
+    if(!bits.length && w.f>0 && w.f<90000) bits.push('词频排名 #'+w.f);
+    bits.push((w.l===4?'四级':'六级')+'词');
+    fb.textContent=bits.join(' · ');
   }
   document.getElementById('answerReveal').style.display='block';
   document.getElementById('quizActions').style.display='none';
